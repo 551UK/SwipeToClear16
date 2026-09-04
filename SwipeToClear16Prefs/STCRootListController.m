@@ -4,20 +4,11 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <spawn.h>
 #import <unistd.h>
-#import <dlfcn.h>
 
 extern char **environ;
 
 static NSString * const STCPrefsDomain = @"com.551.swipetoclear16";
 static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.changed";
-
-static void STCLoadColorPicker(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        void *handle = dlopen("/var/jb/usr/lib/libcolorpicker.dylib", RTLD_LAZY | RTLD_GLOBAL);
-        if (!handle) dlopen("/usr/lib/libcolorpicker.dylib", RTLD_LAZY | RTLD_GLOBAL);
-    });
-}
 
 static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
     if (!tool || access(tool, X_OK) != 0) return NO;
@@ -29,7 +20,6 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    STCLoadColorPicker();
 
     UIImage *image = [UIImage systemImageNamed:@"bell.slash.fill"];
     UIImageView *iconView = [[UIImageView alloc] initWithImage:image];
@@ -74,11 +64,10 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
 }
 
 - (NSArray *)manualSpecifiers {
-    STCLoadColorPicker();
     NSMutableArray *specifiers = [NSMutableArray array];
 
     PSSpecifier *mainGroup = [PSSpecifier groupSpecifierWithName:@"SwipeToClear16"];
-    [mainGroup setProperty:@"KeepItSimple-style single notification list with a shorter pull to clear." forKey:@"footerText"];
+    [mainGroup setProperty:@"Swipe down on the Lock Screen to clear notifications." forKey:@"footerText"];
     [specifiers addObject:mainGroup];
 
     [specifiers addObject:[self preferenceSpecifierNamed:@"Enabled"
@@ -86,49 +75,14 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
                                                     key:@"Enabled"
                                            defaultValue:@YES]];
 
-    PSSpecifier *pullGroup = [PSSpecifier groupSpecifierWithName:@"Pull to Clear Notifications"];
-    [pullGroup setProperty:@"Indicator position matches KeepItSimple defaults. X moves it left/right and Y moves it up/down." forKey:@"footerText"];
+    PSSpecifier *pullGroup = [PSSpecifier groupSpecifierWithName:@"Pull to Clear"];
+    [pullGroup setProperty:@"Adjust how far you need to pull down before notifications clear." forKey:@"footerText"];
     [specifiers addObject:pullGroup];
 
     [specifiers addObject:[self preferenceSpecifierNamed:@"Pull to Clear"
                                                    cell:PSSwitchCell
                                                     key:@"pullToClearEnabled"
                                            defaultValue:@YES]];
-
-    PSSpecifier *color = [PSSpecifier preferenceSpecifierNamed:@"Indicator Color"
-                                                        target:self
-                                                           set:nil
-                                                           get:nil
-                                                        detail:nil
-                                                          cell:PSLinkCell
-                                                          edit:nil];
-    Class colorCellClass = NSClassFromString(@"PFSimpleLiteColorCell");
-    [color setProperty:(colorCellClass ?: (id)@"PFSimpleLiteColorCell") forKey:@"cellClass"];
-    [color setProperty:@{
-        @"defaults": STCPrefsDomain,
-        @"key": @"customColor",
-        @"fallback": @"#FFFFFF",
-        @"PostNotification": STCPrefsChanged
-    } forKey:@"libcolorpicker"];
-    [specifiers addObject:color];
-
-    PSSpecifier *offsetX = [self preferenceSpecifierNamed:@"Indicator X"
-                                                      cell:PSSliderCell
-                                                       key:@"offsetX"
-                                              defaultValue:@195.0];
-    [offsetX setProperty:@10.0 forKey:@"min"];
-    [offsetX setProperty:@400.0 forKey:@"max"];
-    [offsetX setProperty:@YES forKey:@"showValue"];
-    [specifiers addObject:offsetX];
-
-    PSSpecifier *offsetY = [self preferenceSpecifierNamed:@"Indicator Y"
-                                                      cell:PSSliderCell
-                                                       key:@"offsetY"
-                                              defaultValue:@115.0];
-    [offsetY setProperty:@30.0 forKey:@"min"];
-    [offsetY setProperty:@800.0 forKey:@"max"];
-    [offsetY setProperty:@YES forKey:@"showValue"];
-    [specifiers addObject:offsetY];
 
     PSSpecifier *distance = [self preferenceSpecifierNamed:@"Swipe Distance"
                                                        cell:PSSliderCell
