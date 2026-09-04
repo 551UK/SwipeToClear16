@@ -32,18 +32,18 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.1
+          name: SwipeToClear16-rootless-v1.0.2
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.1
-          name: SwipeToClear16 v1.0.1
+          tag: v1.0.2
+          name: SwipeToClear16 v1.0.2
           body: |
-            Fixes the Lock Screen swipe-to-clear action and the blank settings page.
-            Removes the stock downward notification tuck while enabled.
+            Uses the native iOS 16 notification master list swipe path.
+            Swipe down briefly on the Lock Screen to clear all notifications instead of tucking them.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true

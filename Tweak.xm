@@ -1,5 +1,4 @@
 #import <UIKit/UIKit.h>
-#import <QuartzCore/QuartzCore.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -7,33 +6,19 @@
 
 static NSString * const STCPrefsDomain = @"com.551.swipetoclear16";
 static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.changed";
+
 static BOOL STCEnabled = YES;
-static __weak id STCNotificationListController = nil;
-static __weak id STCNotificationDispatcher = nil;
-static CFTimeInterval STCLastClearTime = 0;
-static char STCGestureInstalledKey;
-static char STCGestureFiredKey;
+static BOOL STCDownwardDrag = NO;
+static BOOL STCClearedThisDrag = NO;
+static CGFloat STCTriggerDistance = 16.0;
 
 @interface SBLockScreenManager : NSObject
 + (instancetype)sharedInstance;
 - (BOOL)isUILocked;
 @end
 
-@interface SBNCNotificationDispatcher : NSObject
-@property (nonatomic, retain) id dispatcher;
-@end
-
-@interface CSCombinedListViewController : UIViewController
-@end
-
-@interface SBDashBoardCombinedListViewController : UIViewController
-@end
-
-@interface NCNotificationCombinedListViewController : UIViewController
-- (id)allNotificationRequests;
-- (void)_clearAllNotificationRequests;
-- (void)_clearAllPriorityListNotificationRequests;
-- (void)forceNotificationHistoryRevealed:(BOOL)revealed animated:(BOOL)animated;
+@interface NCNotificationMasterList : NSObject
+- (id)delegate;
 @end
 
 static void STCLoadPrefs(void) {
@@ -43,7 +28,11 @@ static void STCLoadPrefs(void) {
     if (value) CFRelease(value);
 }
 
-static void STCPrefsChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+static void STCPrefsChangedCallback(CFNotificationCenterRef center,
+                                    void *observer,
+                                    CFStringRef name,
+                                    const void *object,
+                                    CFDictionaryRef userInfo) {
     STCLoadPrefs();
 }
 
@@ -57,230 +46,131 @@ static BOOL STCDeviceIsLocked(void) {
     return ((BOOL (*)(id, SEL))objc_msgSend)(manager, @selector(isUILocked));
 }
 
-static id STCAllNotificationRequests(void) {
-    id controller = STCNotificationListController;
-    if (!controller) return nil;
+static unsigned long long STCNotificationCount(id masterList) {
+    if (!masterList) return 0;
 
-    SEL allRequestsSel = NSSelectorFromString(@"allNotificationRequests");
-    if ([controller respondsToSelector:allRequestsSel]) {
-        return ((id (*)(id, SEL))objc_msgSend)(controller, allRequestsSel);
+    SEL notificationCount = NSSelectorFromString(@"notificationCount");
+    if ([masterList respondsToSelector:notificationCount]) {
+        return ((unsigned long long (*)(id, SEL))objc_msgSend)(masterList, notificationCount);
     }
-    return nil;
+
+    SEL totalCount = NSSelectorFromString(@"totalNotificationCount");
+    if ([masterList respondsToSelector:totalCount]) {
+        return ((unsigned long long (*)(id, SEL))objc_msgSend)(masterList, totalCount);
+    }
+
+    SEL count = NSSelectorFromString(@"count");
+    if ([masterList respondsToSelector:count]) {
+        return ((unsigned long long (*)(id, SEL))objc_msgSend)(masterList, count);
+    }
+
+    // Do not block a supported iOS 16 point release just because its count selector differs.
+    return 1;
 }
 
-static BOOL STCHasNotifications(void) {
-    id requests = STCAllNotificationRequests();
-    if ([requests respondsToSelector:@selector(count)]) {
-        return [requests count] > 0;
-    }
-    return STCNotificationListController != nil;
-}
+static void STCClearMasterList(id masterList) {
+    if (!masterList) return;
 
-static void STCClearAllNotifications(void) {
-    if (!STCEnabled || !STCDeviceIsLocked()) return;
+    // iOS 16's NCNotificationMasterListDelegate inherits the list-base clear-all callback.
+    SEL delegateSel = NSSelectorFromString(@"delegate");
+    id delegate = [masterList respondsToSelector:delegateSel]
+        ? ((id (*)(id, SEL))objc_msgSend)(masterList, delegateSel)
+        : nil;
 
-    CFTimeInterval now = CACurrentMediaTime();
-    if ((now - STCLastClearTime) < 0.35) return;
-    STCLastClearTime = now;
-
-    id controller = STCNotificationListController;
-    id requests = STCAllNotificationRequests();
-    id dispatcher = STCNotificationDispatcher;
-
-    SEL dispatcherClear = NSSelectorFromString(@"destination:requestsClearingNotificationRequests:");
-    if (dispatcher && requests && [dispatcher respondsToSelector:dispatcherClear]) {
-        ((void (*)(id, SEL, id, id))objc_msgSend)(dispatcher, dispatcherClear, nil, requests);
+    SEL requestsClearAll = NSSelectorFromString(@"notificationListBaseComponentRequestsClearingAll:");
+    if (delegate && [delegate respondsToSelector:requestsClearAll]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(delegate, requestsClearAll, masterList);
         return;
     }
 
-    if (!controller) return;
-
-    SEL clearAll = NSSelectorFromString(@"_clearAllNotificationRequests");
-    if ([controller respondsToSelector:clearAll]) {
-        ((void (*)(id, SEL))objc_msgSend)(controller, clearAll);
+    // Fallbacks for neighbouring UserNotificationsUIKit implementations.
+    SEL clearAll = NSSelectorFromString(@"clearAll");
+    if ([masterList respondsToSelector:clearAll]) {
+        ((void (*)(id, SEL))objc_msgSend)(masterList, clearAll);
         return;
     }
 
-    SEL clearPriority = NSSelectorFromString(@"_clearAllPriorityListNotificationRequests");
-    if ([controller respondsToSelector:clearPriority]) {
-        ((void (*)(id, SEL))objc_msgSend)(controller, clearPriority);
-    }
-}
-
-@interface STCGestureDelegate : NSObject <UIGestureRecognizerDelegate>
-+ (instancetype)sharedInstance;
-@end
-
-@implementation STCGestureDelegate
-+ (instancetype)sharedInstance {
-    static STCGestureDelegate *shared;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ shared = [STCGestureDelegate new]; });
-    return shared;
-}
-
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
-    if (!STCEnabled || !STCDeviceIsLocked() || !STCHasNotifications()) return NO;
-    if (![gestureRecognizer isKindOfClass:[UIPanGestureRecognizer class]]) return YES;
-
-    UIPanGestureRecognizer *pan = (UIPanGestureRecognizer *)gestureRecognizer;
-    CGPoint velocity = [pan velocityInView:pan.view];
-    if (velocity.y <= 0.0) return NO;
-    if (fabs(velocity.y) <= fabs(velocity.x)) return NO;
-    return YES;
-}
-
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
-    return NO;
-}
-@end
-
-@interface STCGestureHandler : NSObject
-+ (instancetype)sharedInstance;
-- (void)handlePan:(UIPanGestureRecognizer *)gesture;
-@end
-
-@implementation STCGestureHandler
-+ (instancetype)sharedInstance {
-    static STCGestureHandler *shared;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ shared = [STCGestureHandler new]; });
-    return shared;
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    if (!STCEnabled || !STCDeviceIsLocked()) return;
-
-    if (gesture.state == UIGestureRecognizerStateBegan) {
-        objc_setAssociatedObject(gesture, &STCGestureFiredKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    SEL privateClear = NSSelectorFromString(@"_clearAllNotifications:supplementaryViewControllers:");
+    if ([masterList respondsToSelector:privateClear]) {
+        ((void (*)(id, SEL, BOOL, BOOL))objc_msgSend)(masterList, privateClear, YES, YES);
         return;
     }
 
-    if (gesture.state == UIGestureRecognizerStateChanged) {
-        if ([objc_getAssociatedObject(gesture, &STCGestureFiredKey) boolValue]) return;
+    SEL oldClear = NSSelectorFromString(@"notificationListComponentRequestsClearingAllNotificationRequests:");
+    if ([masterList respondsToSelector:oldClear]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(masterList, oldClear, masterList);
+    }
+}
 
-        CGPoint translation = [gesture translationInView:gesture.view];
-        if (translation.y >= 30.0 && translation.y > fabs(translation.x)) {
-            objc_setAssociatedObject(gesture, &STCGestureFiredKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            STCClearAllNotifications();
+static BOOL STCIsIntentionalDownwardPan(UIScrollView *scrollView) {
+    UIPanGestureRecognizer *pan = scrollView.panGestureRecognizer;
+    if (!pan) return NO;
+
+    UIGestureRecognizerState state = pan.state;
+    if (state != UIGestureRecognizerStateBegan && state != UIGestureRecognizerStateChanged) return NO;
+
+    CGPoint translation = [pan translationInView:scrollView];
+    CGPoint velocity = [pan velocityInView:scrollView];
+
+    BOOL translationDown = translation.y > 0.0 && translation.y > fabs(translation.x);
+    BOOL velocityDown = velocity.y > 0.0 && velocity.y > fabs(velocity.x);
+    return translationDown || velocityDown;
+}
+
+%hook NCNotificationMasterList
+
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
+    STCDownwardDrag = NO;
+    STCClearedThisDrag = NO;
+    %orig;
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if (!STCEnabled || !STCDeviceIsLocked() || STCNotificationCount(self) == 0) {
+        %orig;
+        return;
+    }
+
+    if (STCIsIntentionalDownwardPan(scrollView)) {
+        STCDownwardDrag = YES;
+
+        // Do not pass the downward Lock Screen drag into Apple's native list handler.
+        // That handler is what collapses the notifications into the bottom count indicator.
+        CGPoint translation = [scrollView.panGestureRecognizer translationInView:scrollView];
+        if (!STCClearedThisDrag && translation.y >= STCTriggerDistance) {
+            STCClearedThisDrag = YES;
+            STCClearMasterList(self);
         }
         return;
     }
 
-    if (gesture.state == UIGestureRecognizerStateEnded ||
-        gesture.state == UIGestureRecognizerStateCancelled ||
-        gesture.state == UIGestureRecognizerStateFailed) {
-        objc_setAssociatedObject(gesture, &STCGestureFiredKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    %orig;
 }
-@end
 
-static void STCMakeNativePansWait(UIView *view, UIPanGestureRecognizer *ourPan) {
-    if (!view || !ourPan) return;
-
-    for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
-        if (gesture != ourPan && [gesture isKindOfClass:[UIPanGestureRecognizer class]]) {
-            [(UIPanGestureRecognizer *)gesture requireGestureRecognizerToFail:ourPan];
+- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView
+                     withVelocity:(CGPoint)velocity
+              targetContentOffset:(CGPoint *)targetContentOffset {
+    if (STCEnabled && STCDeviceIsLocked() && STCDownwardDrag) {
+        // If the user released extremely quickly, still treat it as swipe-to-clear.
+        if (!STCClearedThisDrag && STCNotificationCount(self) > 0) {
+            STCClearedThisDrag = YES;
+            STCClearMasterList(self);
         }
-    }
 
-    for (UIView *subview in view.subviews) {
-        STCMakeNativePansWait(subview, ourPan);
-    }
-}
-
-static void STCInstallGestureOnView(UIView *view) {
-    if (!view) return;
-
-    UIPanGestureRecognizer *pan = objc_getAssociatedObject(view, &STCGestureInstalledKey);
-    if (!pan) {
-        pan = [[UIPanGestureRecognizer alloc] initWithTarget:[STCGestureHandler sharedInstance] action:@selector(handlePan:)];
-        pan.minimumNumberOfTouches = 1;
-        pan.maximumNumberOfTouches = 1;
-        pan.cancelsTouchesInView = YES;
-        pan.delaysTouchesBegan = NO;
-        pan.delaysTouchesEnded = NO;
-        pan.delegate = [STCGestureDelegate sharedInstance];
-        [view addGestureRecognizer:pan];
-        objc_setAssociatedObject(view, &STCGestureInstalledKey, pan, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    STCMakeNativePansWait(view, pan);
-}
-
-%hook SBNCNotificationDispatcher
-- (id)init {
-    id result = %orig;
-    if ([result respondsToSelector:@selector(dispatcher)]) {
-        STCNotificationDispatcher = ((id (*)(id, SEL))objc_msgSend)(result, @selector(dispatcher));
-    }
-    return result;
-}
-
-- (void)setDispatcher:(id)dispatcher {
-    %orig;
-    STCNotificationDispatcher = dispatcher;
-}
-%end
-
-%hook NCNotificationCombinedListViewController
-- (id)init {
-    id result = %orig;
-    STCNotificationListController = result;
-    return result;
-}
-
-- (void)viewDidLoad {
-    %orig;
-    STCNotificationListController = self;
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    STCNotificationListController = self;
-}
-
-- (void)forceNotificationHistoryRevealed:(BOOL)revealed animated:(BOOL)animated {
-    if (STCEnabled && STCDeviceIsLocked() && !revealed) {
-        %orig(YES, NO);
+        // Never let the native end-of-drag path commit the tucked/count state.
+        if (targetContentOffset) *targetContentOffset = scrollView.contentOffset;
         return;
     }
-    %orig;
-}
-%end
 
-%hook CSCombinedListViewController
-- (void)viewDidLoad {
     %orig;
-    STCInstallGestureOnView(self.view);
 }
 
-- (void)viewDidAppear:(BOOL)animated {
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
+    STCDownwardDrag = NO;
+    STCClearedThisDrag = NO;
     %orig;
-    STCInstallGestureOnView(self.view);
 }
 
-- (void)viewDidLayoutSubviews {
-    %orig;
-    STCInstallGestureOnView(self.view);
-}
-%end
-
-%hook SBDashBoardCombinedListViewController
-- (void)viewDidLoad {
-    %orig;
-    STCInstallGestureOnView(self.view);
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    STCInstallGestureOnView(self.view);
-}
-
-- (void)viewDidLayoutSubviews {
-    %orig;
-    STCInstallGestureOnView(self.view);
-}
 %end
 
 %ctor {
