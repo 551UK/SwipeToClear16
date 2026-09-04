@@ -1,7 +1,9 @@
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <math.h>
 
 static NSString * const STCPrefsDomain = @"com.551.swipetoclear16";
 static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.changed";
@@ -14,6 +16,15 @@ static char STCGestureFiredKey;
 @interface SBLockScreenManager : NSObject
 + (instancetype)sharedInstance;
 - (BOOL)isUILocked;
+@end
+
+@interface CSCombinedListViewController : UIViewController
+@end
+
+@interface SBDashBoardCombinedListViewController : UIViewController
+@end
+
+@interface NCNotificationCombinedListViewController : UIViewController
 @end
 
 static void STCLoadPrefs(void) {
