@@ -1,0 +1,50 @@
+name: Build rootless deb
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: swipetoclear16-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-sdks: https://github.com/theos/sdks
+          theos-sdks-branch: master
+
+      - name: Build rootless package
+        run: make clean package FINALPACKAGE=1
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwipeToClear16-rootless-v1.0.0
+          path: packages/*.deb
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v1.0.0
+          name: SwipeToClear16 v1.0.0
+          body: |
+            Swipe down on the iOS 16 Lock Screen to clear all notifications.
+          artifacts: packages/*.deb
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
