@@ -32,18 +32,19 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.2
+          name: SwipeToClear16-rootless-v1.0.3
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.2
-          name: SwipeToClear16 v1.0.2
+          tag: v1.0.3
+          name: SwipeToClear16 v1.0.3
           body: |
-            Uses the native iOS 16 notification master list swipe path.
-            Swipe down briefly on the Lock Screen to clear all notifications instead of tucking them.
+            Reworked using KeepItSimple 1.2.5's iOS 16 notification-list path.
+            Uses incomingSectionList clearAll and suppresses the native tuck/history transition while locked.
+            Short swipe threshold: about 26 points.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
