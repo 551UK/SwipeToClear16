@@ -11,8 +11,8 @@ static BOOL STCPullToClearEnabled = YES;
 static CGFloat STCSwipeDistance = 30.0;
 
 static __weak id STCStructuredController = nil;
-static char STCFullScreenPanKey;
-static char STCFullScreenPanDelegateKey;
+static char STCCoverSheetPanKey;
+static char STCCoverSheetPanDelegateKey;
 static char STCDidClearThisPullKey;
 
 @interface NCNotificationStructuredSectionList : NSObject
@@ -30,6 +30,9 @@ static char STCDidClearThisPullKey;
 @interface NCNotificationStructuredListViewController : UIViewController
 - (NCNotificationMasterList *)masterList;
 - (UIScrollView *)masterListView;
+@end
+
+@interface CSCoverSheetViewController : UIViewController
 @end
 
 static id STCCopyPreference(NSString *key) {
@@ -87,6 +90,37 @@ static BOOL STCClearNotificationsFromController(NCNotificationStructuredListView
     return NO;
 }
 
+static void STCForceHistoryRevealedIfNeeded(NCNotificationStructuredListViewController *controller) {
+    if (!STCEnabled || !controller) return;
+
+    NCNotificationMasterList *masterList = [controller masterList];
+    if ([masterList respondsToSelector:@selector(setNotificationHistoryRevealed:)]) {
+        [masterList setNotificationHistoryRevealed:YES];
+    }
+}
+
+static NCNotificationStructuredListViewController *STCFindStructuredController(UIViewController *root) {
+    if (!root) return nil;
+
+    Class structuredClass = NSClassFromString(@"NCNotificationStructuredListViewController");
+    if (structuredClass && [root isKindOfClass:structuredClass]) {
+        return (NCNotificationStructuredListViewController *)root;
+    }
+
+    for (UIViewController *child in root.childViewControllers) {
+        NCNotificationStructuredListViewController *found = STCFindStructuredController(child);
+        if (found) return found;
+    }
+
+    UIViewController *presented = root.presentedViewController;
+    if (presented) {
+        NCNotificationStructuredListViewController *found = STCFindStructuredController(presented);
+        if (found) return found;
+    }
+
+    return nil;
+}
+
 @interface STCFullScreenPanDelegate : NSObject <UIGestureRecognizerDelegate>
 @end
 
@@ -109,28 +143,18 @@ static BOOL STCClearNotificationsFromController(NCNotificationStructuredListView
 
 @end
 
-static void STCInstallFullScreenPan(NCNotificationStructuredListViewController *controller) {
+static void STCInstallCoverSheetPan(CSCoverSheetViewController *controller) {
     if (!controller) return;
 
-    // Install immediately on the controller view, even before it has joined a
-    // UIWindow after SpringBoard starts. As soon as the Lock Screen window is
-    // available, move the exact same recognizer onto that window so the proven
-    // full-screen behavior from v1.0.9/v1.0.10 is preserved.
-    UIView *host = controller.view.window ?: controller.view;
-    if (!host) return;
+    UIPanGestureRecognizer *existing = objc_getAssociatedObject(controller, &STCCoverSheetPanKey);
+    if (existing && existing.view) return;
 
-    UIPanGestureRecognizer *existing = objc_getAssociatedObject(controller, &STCFullScreenPanKey);
-    if (existing) {
-        if (existing.view != host) {
-            if (existing.view) [existing.view removeGestureRecognizer:existing];
-            [host addGestureRecognizer:existing];
-        }
-        return;
-    }
+    UIView *host = controller.view;
+    if (!host) return;
 
     STCFullScreenPanDelegate *delegate = [[STCFullScreenPanDelegate alloc] init];
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:controller
-                                                                         action:@selector(stc_fullScreenPullPan:)];
+                                                                         action:@selector(stc_coverSheetPullPan:)];
     pan.delegate = delegate;
     pan.cancelsTouchesInView = NO;
     pan.delaysTouchesBegan = NO;
@@ -138,53 +162,8 @@ static void STCInstallFullScreenPan(NCNotificationStructuredListViewController *
     pan.maximumNumberOfTouches = 1;
 
     [host addGestureRecognizer:pan];
-    objc_setAssociatedObject(controller, &STCFullScreenPanKey, pan, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(controller, &STCFullScreenPanDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void STCRemoveFullScreenPan(NCNotificationStructuredListViewController *controller) {
-    if (!controller) return;
-
-    UIPanGestureRecognizer *pan = objc_getAssociatedObject(controller, &STCFullScreenPanKey);
-    if (pan.view) [pan.view removeGestureRecognizer:pan];
-
-    objc_setAssociatedObject(controller, &STCFullScreenPanKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(controller, &STCFullScreenPanDelegateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(controller, &STCDidClearThisPullKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void STCForceHistoryRevealedIfNeeded(NCNotificationStructuredListViewController *controller) {
-    if (!STCEnabled || !controller) return;
-
-    NCNotificationMasterList *masterList = [controller masterList];
-    if ([masterList respondsToSelector:@selector(setNotificationHistoryRevealed:)]) {
-        [masterList setNotificationHistoryRevealed:YES];
-    }
-}
-
-static void STCEnsureLockScreenReady(NCNotificationStructuredListViewController *controller) {
-    if (!controller) return;
-    STCStructuredController = controller;
-    STCInstallFullScreenPan(controller);
-    STCForceHistoryRevealedIfNeeded(controller);
-}
-
-static void STCScheduleStartupInstall(NCNotificationStructuredListViewController *controller) {
-    if (!controller) return;
-
-    // These are now only quick migration checks so the recognizer moves from
-    // the controller view to the Lock Screen window as soon as it exists. The
-    // gesture itself is already installed synchronously in viewDidLoad.
-    const NSTimeInterval delays[] = {0.0, 0.02, 0.05, 0.10, 0.20, 0.40, 0.80};
-    const NSUInteger count = sizeof(delays) / sizeof(delays[0]);
-
-    for (NSUInteger i = 0; i < count; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[i] * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            if (STCStructuredController != controller) return;
-            STCEnsureLockScreenReady(controller);
-        });
-    }
+    objc_setAssociatedObject(controller, &STCCoverSheetPanKey, pan, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(controller, &STCCoverSheetPanDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static void STCPrefsChangedCallback(CFNotificationCenterRef center,
@@ -196,41 +175,29 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 
     dispatch_async(dispatch_get_main_queue(), ^{
         NCNotificationStructuredListViewController *controller = STCStructuredController;
-        if (controller) STCEnsureLockScreenReady(controller);
+        if (controller) STCForceHistoryRevealedIfNeeded(controller);
     });
 }
 
-%hook NCNotificationStructuredListViewController
+%hook CSCoverSheetViewController
 
 - (void)viewDidLoad {
     %orig;
-    STCEnsureLockScreenReady(self);
-    STCScheduleStartupInstall(self);
+    STCInstallCoverSheetPan(self);
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
-    STCEnsureLockScreenReady(self);
-    STCScheduleStartupInstall(self);
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    STCEnsureLockScreenReady(self);
+    STCInstallCoverSheetPan(self);
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    STCEnsureLockScreenReady(self);
-}
-
-- (void)viewDidDisappear:(BOOL)animated {
-    STCRemoveFullScreenPan(self);
-    %orig;
+    STCInstallCoverSheetPan(self);
 }
 
 %new
-- (void)stc_fullScreenPullPan:(UIPanGestureRecognizer *)pan {
+- (void)stc_coverSheetPullPan:(UIPanGestureRecognizer *)pan {
     if (!STCPullFeatureEnabled()) return;
 
     UIGestureRecognizerState state = pan.state;
@@ -261,9 +228,38 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 
     objc_setAssociatedObject(self, &STCDidClearThisPullKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    if (STCClearNotificationsFromController(self)) {
-        STCPlayClearHaptic();
+    NCNotificationStructuredListViewController *target = STCFindStructuredController(self);
+    if (!target) target = STCStructuredController;
+
+    if (target) {
+        STCStructuredController = target;
+        STCForceHistoryRevealedIfNeeded(target);
+        if (STCClearNotificationsFromController(target)) {
+            STCPlayClearHaptic();
+        }
     }
+}
+
+%end
+
+%hook NCNotificationStructuredListViewController
+
+- (void)viewDidLoad {
+    %orig;
+    STCStructuredController = self;
+    STCForceHistoryRevealedIfNeeded(self);
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    STCStructuredController = self;
+    STCForceHistoryRevealedIfNeeded(self);
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    STCStructuredController = self;
+    STCForceHistoryRevealedIfNeeded(self);
 }
 
 %end
