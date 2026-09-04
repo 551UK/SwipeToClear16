@@ -1,10 +1,9 @@
 # SwipeToClear16
 
-Swipe down on the iOS 16 Lock Screen to clear all notifications.
+Clear all Lock Screen notifications with one short downward swipe anywhere on the Lock Screen.
 
-- Short swipe gesture
-- Enable switch
-- Respring button
-- Rootless iOS 16 / Dopamine
+Also stops notification tucking and removes the Lock Screen Search UI.
 
-v1.0.0
+Rootless iOS 16 / Dopamine.
+
+Made by 551.
