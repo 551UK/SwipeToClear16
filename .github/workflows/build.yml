@@ -49,11 +49,3 @@ jobs:
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
-
-      - name: Remove old releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for id in $(gh api --paginate repos/${{ github.repository }}/releases --jq '.[] | select(.tag_name != "v1.0.12") | .id'); do
-            gh api --method DELETE repos/${{ github.repository }}/releases/$id
-          done
