@@ -152,6 +152,29 @@ static void STCForceHistoryRevealedIfNeeded(NCNotificationStructuredListViewCont
     }
 }
 
+static void STCEnsureLockScreenReady(NCNotificationStructuredListViewController *controller) {
+    if (!controller) return;
+    STCStructuredController = controller;
+    STCInstallFullScreenPan(controller);
+    STCForceHistoryRevealedIfNeeded(controller);
+}
+
+static void STCScheduleStartupInstall(NCNotificationStructuredListViewController *controller) {
+    if (!controller) return;
+
+    const NSTimeInterval delays[] = {0.0, 0.10, 0.30, 0.65, 1.20, 2.00};
+    const NSUInteger count = sizeof(delays) / sizeof(delays[0]);
+
+    for (NSUInteger i = 0; i < count; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[i] * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            if (STCStructuredController != controller) return;
+            if (!controller.view.window) return;
+            STCEnsureLockScreenReady(controller);
+        });
+    }
+}
+
 static void STCPrefsChangedCallback(CFNotificationCenterRef center,
                                     void *observer,
                                     CFStringRef name,
@@ -161,7 +184,7 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 
     dispatch_async(dispatch_get_main_queue(), ^{
         NCNotificationStructuredListViewController *controller = STCStructuredController;
-        if (controller) STCForceHistoryRevealedIfNeeded(controller);
+        if (controller) STCEnsureLockScreenReady(controller);
     });
 }
 
@@ -171,13 +194,23 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
     %orig;
     STCStructuredController = self;
     STCForceHistoryRevealedIfNeeded(self);
+    STCScheduleStartupInstall(self);
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    STCEnsureLockScreenReady(self);
+    STCScheduleStartupInstall(self);
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    STCStructuredController = self;
-    STCInstallFullScreenPan(self);
-    STCForceHistoryRevealedIfNeeded(self);
+    STCEnsureLockScreenReady(self);
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    STCEnsureLockScreenReady(self);
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -211,8 +244,6 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
     BOOL downward = translation.y > 0.0 && translation.y > fabs(translation.x) && velocity.y >= -50.0;
     if (!downward || translation.y < STCSwipeDistance) return;
 
-    // Do not steal top-edge Control Center/status-bar pulls. Everywhere else on
-    // the Lock Screen is valid, including the empty area below notifications.
     CGPoint currentLocation = [pan locationInView:host];
     CGFloat startY = currentLocation.y - translation.y;
     if (startY < 70.0) return;
