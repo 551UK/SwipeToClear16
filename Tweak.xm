@@ -1,6 +1,5 @@
 #import <UIKit/UIKit.h>
 #import <CoreFoundation/CoreFoundation.h>
-#import <AudioToolbox/AudioServices.h>
 #import <objc/runtime.h>
 #import <math.h>
 
@@ -61,7 +60,9 @@ static BOOL STCPullFeatureEnabled(void) {
 }
 
 static void STCPlayClearHaptic(void) {
-    AudioServicesPlaySystemSound(1520);
+    UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
+    [feedback prepare];
+    [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
 }
 
 static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
