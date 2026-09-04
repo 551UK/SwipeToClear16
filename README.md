@@ -6,3 +6,5 @@ Swipe down on the iOS 16 Lock Screen to clear all notifications.
 - Enable switch
 - Respring button
 - Rootless iOS 16 / Dopamine
+
+v1.0.0
