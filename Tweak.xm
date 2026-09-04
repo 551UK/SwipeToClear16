@@ -6,54 +6,97 @@
 
 static NSString * const STCPrefsDomain = @"com.551.swipetoclear16";
 static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.changed";
-static NSString * const STCInteractiveDisplayStyleReason = @"NCNotificationListDisplayStyleReasonInteractiveTransition";
 
 static BOOL STCEnabled = YES;
-static BOOL STCClearedThisPan = NO;
-static const CGFloat STCTriggerDistance = 26.0;
-static const CGFloat STCSpinnerStartDistance = 5.0;
+static BOOL STCPullToClearEnabled = YES;
+static NSString *STCCustomColor = @"#FFFFFF";
+static CGFloat STCIndicatorOffsetX = 195.0;
+static CGFloat STCIndicatorOffsetY = 115.0;
+static CGFloat STCRefreshControlScale = 0.8;
+static CGFloat STCSwipeDistance = 30.0;
 
-@interface SBLockScreenManager : NSObject
-+ (instancetype)sharedInstance;
-- (BOOL)isUILocked;
+static __weak id STCStructuredController = nil;
+static char STCRefreshControlKey;
+static char STCLeftConstraintKey;
+static char STCTopConstraintKey;
+static char STCPanTargetInstalledKey;
+static char STCDidClearThisPullKey;
+
+@interface NCNotificationStructuredSectionList : NSObject
+- (unsigned long long)sectionType;
+- (void)clearAll;
+- (void)clearAllNotificationRequests;
+@end
+
+@interface NCNotificationMasterList : NSObject
+- (NCNotificationStructuredSectionList *)incomingSectionList;
 @end
 
 @interface NCNotificationStructuredListViewController : UIViewController
-- (id)masterList;
+- (NCNotificationMasterList *)masterList;
 - (UIScrollView *)masterListView;
 @end
 
+static UIColor *STCColorFromString(NSString *value) {
+    NSString *string = [value isKindOfClass:[NSString class]] ? value : @"#FFFFFF";
+    CGFloat alpha = 1.0;
+
+    NSArray<NSString *> *parts = [string componentsSeparatedByString:@":"];
+    NSString *hex = parts.firstObject ?: @"#FFFFFF";
+    if (parts.count > 1) {
+        alpha = MAX(0.0, MIN(1.0, parts[1].doubleValue));
+    }
+
+    hex = [[hex stringByReplacingOccurrencesOfString:@"#" withString:@""] uppercaseString];
+    if (hex.length != 6 && hex.length != 8) hex = @"FFFFFF";
+
+    unsigned long long raw = 0;
+    [[NSScanner scannerWithString:hex] scanHexLongLong:&raw];
+
+    CGFloat red = 1.0, green = 1.0, blue = 1.0;
+    if (hex.length == 8) {
+        red = ((raw >> 24) & 0xFF) / 255.0;
+        green = ((raw >> 16) & 0xFF) / 255.0;
+        blue = ((raw >> 8) & 0xFF) / 255.0;
+        alpha = (raw & 0xFF) / 255.0;
+    } else {
+        red = ((raw >> 16) & 0xFF) / 255.0;
+        green = ((raw >> 8) & 0xFF) / 255.0;
+        blue = (raw & 0xFF) / 255.0;
+    }
+
+    return [UIColor colorWithRed:red green:green blue:blue alpha:alpha];
+}
+
+static id STCCopyPreference(NSString *key) {
+    CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)key,
+                                                        (__bridge CFStringRef)STCPrefsDomain);
+    return value ? CFBridgingRelease(value) : nil;
+}
+
 static void STCLoadPrefs(void) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)STCPrefsDomain);
-    CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("Enabled"), (__bridge CFStringRef)STCPrefsDomain);
-    STCEnabled = value ? CFBooleanGetValue((CFBooleanRef)value) : YES;
-    if (value) CFRelease(value);
+
+    id enabled = STCCopyPreference(@"Enabled");
+    id pull = STCCopyPreference(@"pullToClearEnabled");
+    id color = STCCopyPreference(@"customColor");
+    id offsetX = STCCopyPreference(@"offsetX");
+    id offsetY = STCCopyPreference(@"offsetY");
+    id swipeDistance = STCCopyPreference(@"swipeDistance");
+
+    STCEnabled = enabled ? [enabled boolValue] : YES;
+    STCPullToClearEnabled = pull ? [pull boolValue] : YES;
+    STCCustomColor = [color isKindOfClass:[NSString class]] ? [color copy] : @"#FFFFFF";
+    STCIndicatorOffsetX = offsetX ? [offsetX doubleValue] : 195.0;
+    STCIndicatorOffsetY = offsetY ? [offsetY doubleValue] : 115.0;
+    STCSwipeDistance = swipeDistance ? [swipeDistance doubleValue] : 30.0;
+
+    if (STCSwipeDistance < 10.0) STCSwipeDistance = 10.0;
+    if (STCSwipeDistance > 120.0) STCSwipeDistance = 120.0;
 }
 
-static void STCPrefsChangedCallback(CFNotificationCenterRef center,
-                                    void *observer,
-                                    CFStringRef name,
-                                    const void *object,
-                                    CFDictionaryRef userInfo) {
-    STCLoadPrefs();
-}
-
-static BOOL STCDeviceIsLocked(void) {
-    Class cls = objc_getClass("SBLockScreenManager");
-    if (!cls || ![cls respondsToSelector:@selector(sharedInstance)]) return NO;
-
-    id manager = ((id (*)(id, SEL))objc_msgSend)((id)cls, @selector(sharedInstance));
-    if (!manager || ![manager respondsToSelector:@selector(isUILocked)]) return NO;
-
-    return ((BOOL (*)(id, SEL))objc_msgSend)(manager, @selector(isUILocked));
-}
-
-static BOOL STCActiveOnLockScreen(void) {
-    return STCEnabled && STCDeviceIsLocked();
-}
-
-static BOOL STCIsInteractiveDisplayStyleReason(id reason) {
-    return [reason isKindOfClass:[NSString class]] && [(NSString *)reason isEqualToString:STCInteractiveDisplayStyleReason];
+static BOOL STCPullFeatureEnabled(void) {
+    return STCEnabled && STCPullToClearEnabled;
 }
 
 static void STCPlayClearHaptic(void) {
@@ -62,197 +105,182 @@ static void STCPlayClearHaptic(void) {
     [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
 }
 
-static BOOL STCClearNotificationsFromController(id controller) {
+static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
     if (!controller) return NO;
 
-    SEL masterListSel = NSSelectorFromString(@"masterList");
-    if (![controller respondsToSelector:masterListSel]) return NO;
-
-    id masterList = ((id (*)(id, SEL))objc_msgSend)(controller, masterListSel);
+    NCNotificationMasterList *masterList = [controller masterList];
     if (!masterList) return NO;
 
-    SEL incomingSel = NSSelectorFromString(@"incomingSectionList");
-    id incomingList = [masterList respondsToSelector:incomingSel]
-        ? ((id (*)(id, SEL))objc_msgSend)(masterList, incomingSel)
-        : nil;
+    NCNotificationStructuredSectionList *incoming = [masterList incomingSectionList];
+    if (!incoming) return NO;
 
-    // KeepItSimple 1.2.5's iOS 16 clear path.
-    SEL clearAllSel = NSSelectorFromString(@"clearAll");
-    if (incomingList && [incomingList respondsToSelector:clearAllSel]) {
-        ((void (*)(id, SEL))objc_msgSend)(incomingList, clearAllSel);
-        return YES;
+    if (@available(iOS 16.0, *)) {
+        if ([incoming respondsToSelector:@selector(clearAll)]) {
+            [incoming clearAll];
+            return YES;
+        }
     }
 
-    SEL clearRequestsSel = NSSelectorFromString(@"clearAllNotificationRequests");
-    if (incomingList && [incomingList respondsToSelector:clearRequestsSel]) {
-        ((void (*)(id, SEL))objc_msgSend)(incomingList, clearRequestsSel);
+    if ([incoming respondsToSelector:@selector(clearAllNotificationRequests)]) {
+        [incoming clearAllNotificationRequests];
         return YES;
     }
 
     return NO;
 }
 
+static void STCRemoveRefreshControl(NCNotificationStructuredListViewController *controller) {
+    if (!controller) return;
+
+    UIRefreshControl *refresh = objc_getAssociatedObject(controller, &STCRefreshControlKey);
+    NSLayoutConstraint *left = objc_getAssociatedObject(controller, &STCLeftConstraintKey);
+    NSLayoutConstraint *top = objc_getAssociatedObject(controller, &STCTopConstraintKey);
+    UIScrollView *listView = [controller masterListView];
+
+    if (left) left.active = NO;
+    if (top) top.active = NO;
+    if (refresh && listView.refreshControl == refresh) {
+        listView.refreshControl = nil;
+    }
+
+    objc_setAssociatedObject(controller, &STCRefreshControlKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(controller, &STCLeftConstraintKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(controller, &STCTopConstraintKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void STCConfigureRefreshControl(NCNotificationStructuredListViewController *controller) {
+    if (!controller) return;
+
+    UIScrollView *listView = [controller masterListView];
+    if (!listView) return;
+
+    if (!STCPullFeatureEnabled()) {
+        STCRemoveRefreshControl(controller);
+        return;
+    }
+
+    UIRefreshControl *refresh = objc_getAssociatedObject(controller, &STCRefreshControlKey);
+    if (!refresh) {
+        if (listView.refreshControl) return;
+
+        refresh = [[UIRefreshControl alloc] init];
+        refresh.transform = CGAffineTransformMakeScale(STCRefreshControlScale, STCRefreshControlScale);
+        [refresh addTarget:controller
+                    action:@selector(stc_clearNotifications:)
+          forControlEvents:UIControlEventValueChanged];
+
+        listView.refreshControl = refresh;
+        refresh.translatesAutoresizingMaskIntoConstraints = NO;
+
+        NSLayoutConstraint *left = [NSLayoutConstraint constraintWithItem:refresh
+                                                                attribute:NSLayoutAttributeLeft
+                                                                relatedBy:NSLayoutRelationEqual
+                                                                   toItem:controller.view
+                                                                attribute:NSLayoutAttributeLeft
+                                                               multiplier:1.0
+                                                                 constant:STCIndicatorOffsetX];
+        NSLayoutConstraint *top = [NSLayoutConstraint constraintWithItem:refresh
+                                                               attribute:NSLayoutAttributeTop
+                                                               relatedBy:NSLayoutRelationEqual
+                                                                  toItem:controller.view
+                                                               attribute:NSLayoutAttributeTop
+                                                              multiplier:1.0
+                                                                constant:STCIndicatorOffsetY];
+        [controller.view addConstraint:left];
+        [controller.view addConstraint:top];
+
+        objc_setAssociatedObject(controller, &STCRefreshControlKey, refresh, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(controller, &STCLeftConstraintKey, left, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(controller, &STCTopConstraintKey, top, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    refresh.tintColor = STCColorFromString(STCCustomColor);
+    refresh.transform = CGAffineTransformMakeScale(STCRefreshControlScale, STCRefreshControlScale);
+
+    NSLayoutConstraint *left = objc_getAssociatedObject(controller, &STCLeftConstraintKey);
+    NSLayoutConstraint *top = objc_getAssociatedObject(controller, &STCTopConstraintKey);
+    if (left) left.constant = STCIndicatorOffsetX;
+    if (top) top.constant = STCIndicatorOffsetY;
+
+    if (!objc_getAssociatedObject(controller, &STCPanTargetInstalledKey)) {
+        UIPanGestureRecognizer *pan = listView.panGestureRecognizer;
+        if (pan) {
+            [pan addTarget:controller action:@selector(stc_shortPullPan:)];
+            objc_setAssociatedObject(controller, &STCPanTargetInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    }
+}
+
+static void STCPrefsChangedCallback(CFNotificationCenterRef center,
+                                    void *observer,
+                                    CFStringRef name,
+                                    const void *object,
+                                    CFDictionaryRef userInfo) {
+    STCLoadPrefs();
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NCNotificationStructuredListViewController *controller = STCStructuredController;
+        if (controller) STCConfigureRefreshControl(controller);
+    });
+}
+
 %hook NCNotificationStructuredListViewController
 
 - (void)viewDidLoad {
     %orig;
-
-    UIScrollView *listView = nil;
-    if ([self respondsToSelector:@selector(masterListView)]) {
-        listView = [self masterListView];
-    }
-    if (!listView) return;
-
-    // Same pull-to-refresh style visual used by KeepItSimple, but our clear
-    // threshold stays short.
-    UIRefreshControl *refresh = listView.refreshControl;
-    if (!refresh) {
-        refresh = [[UIRefreshControl alloc] init];
-        refresh.tintColor = [UIColor whiteColor];
-        refresh.transform = CGAffineTransformMakeScale(0.78, 0.78);
-        listView.refreshControl = refresh;
-    }
-
-    UIPanGestureRecognizer *pan = listView.panGestureRecognizer;
-    if (pan) {
-        [pan addTarget:self action:@selector(stc_handleNotificationPan:)];
-    }
+    STCStructuredController = self;
+    STCConfigureRefreshControl(self);
 }
 
 %new
-- (void)stc_handleNotificationPan:(UIPanGestureRecognizer *)pan {
-    UIScrollView *listView = [pan.view isKindOfClass:[UIScrollView class]] ? (UIScrollView *)pan.view : nil;
-    UIRefreshControl *refresh = listView.refreshControl;
+- (void)stc_shortPullPan:(UIPanGestureRecognizer *)pan {
+    if (!STCPullFeatureEnabled()) return;
 
-    if (!STCActiveOnLockScreen()) {
-        STCClearedThisPan = NO;
-        if (refresh.refreshing) [refresh endRefreshing];
+    if (pan.state == UIGestureRecognizerStateBegan) {
+        objc_setAssociatedObject(self, &STCDidClearThisPullKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         return;
     }
 
-    UIGestureRecognizerState state = pan.state;
+    if (pan.state != UIGestureRecognizerStateChanged) return;
+    if ([objc_getAssociatedObject(self, &STCDidClearThisPullKey) boolValue]) return;
 
-    if (state == UIGestureRecognizerStateBegan) {
-        STCClearedThisPan = NO;
-        return;
-    }
+    UIScrollView *listView = [pan.view isKindOfClass:[UIScrollView class]] ? (UIScrollView *)pan.view : [self masterListView];
+    UIRefreshControl *refresh = objc_getAssociatedObject(self, &STCRefreshControlKey);
+    if (!listView || !refresh) return;
 
-    if (state == UIGestureRecognizerStateEnded ||
-        state == UIGestureRecognizerStateCancelled ||
-        state == UIGestureRecognizerStateFailed) {
-        if (refresh.refreshing) [refresh endRefreshing];
-        STCClearedThisPan = NO;
-        return;
-    }
+    CGPoint translation = [pan translationInView:listView];
+    CGPoint velocity = [pan velocityInView:listView];
+    CGFloat topOffset = -listView.adjustedContentInset.top;
+    BOOL atTop = listView.contentOffset.y <= (topOffset + 1.0);
+    BOOL downward = translation.y > 0.0 && translation.y > fabs(translation.x) && velocity.y >= -50.0;
 
-    if (state != UIGestureRecognizerStateChanged) return;
+    if (!atTop || !downward || translation.y < STCSwipeDistance) return;
 
-    CGPoint translation = [pan translationInView:pan.view];
-    CGPoint velocity = [pan velocityInView:pan.view];
+    [refresh beginRefreshing];
+    [refresh sendActionsForControlEvents:UIControlEventValueChanged];
+}
 
-    BOOL downward = translation.y > 0.0 &&
-                    translation.y > fabs(translation.x) &&
-                    velocity.y >= -50.0;
+%new
+- (void)stc_clearNotifications:(UIRefreshControl *)refresh {
+    [refresh endRefreshing];
 
-    if (!downward) {
-        if (refresh.refreshing) [refresh endRefreshing];
-        return;
-    }
+    if (!STCPullFeatureEnabled()) return;
+    if ([objc_getAssociatedObject(self, &STCDidClearThisPullKey) boolValue]) return;
 
-    if (refresh && translation.y >= STCSpinnerStartDistance && !refresh.refreshing) {
-        [refresh beginRefreshing];
-    }
+    objc_setAssociatedObject(self, &STCDidClearThisPullKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    if (STCClearedThisPan || translation.y < STCTriggerDistance) return;
-
-    STCClearedThisPan = YES;
-    BOOL cleared = STCClearNotificationsFromController(self);
-
-    if (refresh.refreshing) [refresh endRefreshing];
-
-    if (cleared) {
+    if (STCClearNotificationsFromController(self)) {
         STCPlayClearHaptic();
     }
-
-    // Stop the current stock pan once our clear has fired.
-    pan.enabled = NO;
-    pan.enabled = YES;
 }
 
 %end
 
-%hook NCNotificationMasterList
+%hook SBMainDisplayPolicyAggregator
 
-// iOS 16 uses this reason specifically when a downward drag temporarily
-// changes List/Stack into Count view. Ignore only that interactive override.
-- (void)setOverrideNotificationListDisplayStyleSetting:(unsigned long long)setting
-                                             forReason:(id)reason
-                                 hideNotificationCount:(BOOL)hideNotificationCount {
-    if (STCActiveOnLockScreen() && STCIsInteractiveDisplayStyleReason(reason)) {
-        return;
-    }
-    %orig;
-}
-
-// Keep notifications in the incoming list while locked, matching the stable
-// v1.0.3/KeepItSimple-derived behaviour.
-- (void)migrateNotifications {
-    if (STCActiveOnLockScreen()) return;
-    %orig;
-}
-
-- (BOOL)_isNotificationRequestForIncomingSection:(id)request {
-    if (STCActiveOnLockScreen()) return YES;
+- (BOOL)_allowsCapabilityCoverSheetSpotlightWithExplanation:(id)explanation {
+    if (STCPullFeatureEnabled()) return NO;
     return %orig;
-}
-
-- (BOOL)_isNotificationRequestForHistorySection:(id)request {
-    if (STCActiveOnLockScreen()) return NO;
-    return %orig;
-}
-
-- (BOOL)_isNotificationRequest:(id)request forSectionList:(id)sectionList {
-    if (STCActiveOnLockScreen()) {
-        SEL sectionTypeSel = NSSelectorFromString(@"sectionType");
-        if ([sectionList respondsToSelector:sectionTypeSel]) {
-            unsigned long long sectionType = ((unsigned long long (*)(id, SEL))objc_msgSend)(sectionList, sectionTypeSel);
-            return sectionType == 2;
-        }
-        return NO;
-    }
-    return %orig;
-}
-
-- (void)_migrateNotificationsFromList:(id)fromList
-                               toList:(id)toList
-                          passingTest:(id)test
-                           hideToList:(BOOL)hideToList
-                        clearRequests:(BOOL)clearRequests {
-    if (STCActiveOnLockScreen()) return;
-    %orig;
-}
-
-- (void)_migrateNotificationsFromList:(id)fromList
-                               toList:(id)toList
-                          passingTest:(id)test
-                           hideToList:(BOOL)hideToList
-                        clearRequests:(BOOL)clearRequests
-             filterPersistentRequests:(BOOL)filterPersistentRequests {
-    if (STCActiveOnLockScreen()) return;
-    %orig;
-}
-
-- (void)_migrateNotificationsFromList:(id)fromList
-                               toList:(id)toList
-                          passingTest:(id)passingTest
-            filterRequestsPassingTest:(id)filterRequestsPassingTest
-                           hideToList:(BOOL)hideToList
-                        clearRequests:(BOOL)clearRequests
-                 filterForDestination:(BOOL)filterForDestination
-                       animateRemoval:(BOOL)animateRemoval
-           reorderGroupNotifications:(BOOL)reorderGroupNotifications {
-    if (STCActiveOnLockScreen()) return;
-    %orig;
 }
 
 %end
@@ -260,8 +288,66 @@ static BOOL STCClearNotificationsFromController(id controller) {
 %hook NCNotificationListSectionRevealHintView
 
 - (void)layoutSubviews {
-    if (STCActiveOnLockScreen()) return;
+    if (STCEnabled) return;
     %orig;
+}
+
+%end
+
+%hook NCNotificationMasterList
+
+- (BOOL)_isNotificationRequest:(id)request forSectionList:(NCNotificationStructuredSectionList *)sectionList {
+    if (STCEnabled) {
+        return sectionList.sectionType == 2;
+    }
+    return %orig;
+}
+
+- (void)_migrateNotificationsFromList:(id)fromList
+                               toList:(NCNotificationStructuredSectionList *)toList
+                          passingTest:(id)passingTest
+            filterRequestsPassingTest:(id)filterRequestsPassingTest
+                           hideToList:(BOOL)hideToList
+                        clearRequests:(BOOL)clearRequests
+                 filterForDestination:(BOOL)filterForDestination
+                       animateRemoval:(BOOL)animateRemoval
+           reorderGroupNotifications:(BOOL)reorderGroupNotifications {
+    if (STCEnabled && toList.sectionType == 0) return;
+    %orig;
+}
+
+- (void)migrateNotifications {
+    if (STCEnabled) return;
+    %orig;
+}
+
+- (void)_migrateNotificationsFromList:(id)fromList
+                               toList:(id)toList
+                          passingTest:(id)passingTest
+                           hideToList:(BOOL)hideToList
+                        clearRequests:(BOOL)clearRequests {
+    if (STCEnabled) return;
+    %orig;
+}
+
+- (void)_migrateNotificationsFromList:(id)fromList
+                               toList:(id)toList
+                          passingTest:(id)passingTest
+                           hideToList:(BOOL)hideToList
+                        clearRequests:(BOOL)clearRequests
+             filterPersistentRequests:(BOOL)filterPersistentRequests {
+    if (STCEnabled) return;
+    %orig;
+}
+
+- (BOOL)_isNotificationRequestForIncomingSection:(id)request {
+    if (STCEnabled) return YES;
+    return %orig;
+}
+
+- (BOOL)_isNotificationRequestForHistorySection:(id)request {
+    if (STCEnabled) return NO;
+    return %orig;
 }
 
 %end

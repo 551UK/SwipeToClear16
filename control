@@ -1,9 +1,9 @@
 Package: com.551.swipetoclear16
 Name: SwipeToClear16
-Version: 1.0.5
+Version: 1.0.6
 Architecture: iphoneos-arm64
-Description: Swipe down on the Lock Screen to clear all notifications.
+Description: KeepItSimple-style notification list with a shorter pull to clear.
 Maintainer: 551
 Author: 551
 Section: Tweaks
-Depends: mobilesubstrate, preferenceloader
+Depends: mobilesubstrate, preferenceloader, org.thebigboss.libcolorpicker
