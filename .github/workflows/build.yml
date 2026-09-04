@@ -32,19 +32,19 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.7
+          name: SwipeToClear16-rootless-v1.0.8
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.7
-          name: SwipeToClear16 v1.0.7
+          tag: v1.0.8
+          name: SwipeToClear16 v1.0.8
           body: |
-            Removes the loading circle and its settings.
+            Keeps the working no-tuck notification history behavior from v1.0.7.
+            Fixes clearing by triggering from the notification list's real downward overscroll distance instead of the old exact-at-top check.
             Keeps the short pull, success haptic and Lock Screen Search suppression.
-            Forces notification history to remain revealed while enabled to prevent the hidden/tucked state that required a first reveal swipe.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
