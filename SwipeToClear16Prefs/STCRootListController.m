@@ -12,6 +12,7 @@ static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.c
 
 static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
     if (!tool || access(tool, X_OK) != 0) return NO;
+
     pid_t pid = 0;
     return posix_spawn(&pid, tool, NULL, NULL, argv, environ) == 0;
 }
@@ -21,8 +22,7 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    UIImage *image = [UIImage systemImageNamed:@"bell.slash.fill"];
-    UIImageView *iconView = [[UIImageView alloc] initWithImage:image];
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"bell.slash.fill"]];
     iconView.tintColor = UIColor.labelColor;
     iconView.contentMode = UIViewContentModeScaleAspectFit;
     iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -134,7 +134,8 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
     if (!key) return defaultValue;
 
     CFPreferencesAppSynchronize((__bridge CFStringRef)defaults);
-    CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)defaults);
+    CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)key,
+                                                        (__bridge CFStringRef)defaults);
     return value ? CFBridgingRelease(value) : defaultValue;
 }
 
@@ -162,41 +163,24 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
     NSURL *url = [NSURL URLWithString:@"https://github.com/551UK/SwipeToClear16"];
     if (!url) return;
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIApplication *application = UIApplication.sharedApplication;
-        if ([application respondsToSelector:@selector(openURL:options:completionHandler:)]) {
-            [application openURL:url options:@{} completionHandler:nil];
-        } else {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            [application openURL:url];
-#pragma clang diagnostic pop
-        }
-    });
+    [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
 }
-
-- (void)openRepo:(id)sender { [self openRepo]; }
 
 - (void)respring {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
         const char *sbreload = "/var/jb/usr/bin/sbreload";
-        if (access(sbreload, X_OK) == 0) {
-            char *args[] = {(char *)sbreload, NULL};
-            if (STCSpawnTool(sbreload, args)) return;
-        }
+        char *sbreloadArgs[] = {(char *)sbreload, NULL};
+        if (STCSpawnTool(sbreload, sbreloadArgs)) return;
 
         const char *rootlessKillall = "/var/jb/usr/bin/killall";
-        if (access(rootlessKillall, X_OK) == 0) {
-            char *args[] = {(char *)rootlessKillall, (char *)"-9", (char *)"SpringBoard", NULL};
-            if (STCSpawnTool(rootlessKillall, args)) return;
-        }
+        char *rootlessArgs[] = {(char *)rootlessKillall, (char *)"-9", (char *)"SpringBoard", NULL};
+        if (STCSpawnTool(rootlessKillall, rootlessArgs)) return;
 
         const char *systemKillall = "/usr/bin/killall";
-        char *args[] = {(char *)systemKillall, (char *)"-9", (char *)"SpringBoard", NULL};
-        STCSpawnTool(systemKillall, args);
+        char *systemArgs[] = {(char *)systemKillall, (char *)"-9", (char *)"SpringBoard", NULL};
+        STCSpawnTool(systemKillall, systemArgs);
     });
 }
-
-- (void)respring:(id)sender { [self respring]; }
 
 @end
