@@ -7,7 +7,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = SwipeToClear16
 SwipeToClear16_FILES = Tweak.xm
-SwipeToClear16_FRAMEWORKS = UIKit CoreFoundation AudioToolbox
+SwipeToClear16_FRAMEWORKS = UIKit CoreFoundation
 SwipeToClear16_CFLAGS = -fobjc-arc
 
 SUBPROJECTS += SwipeToClear16Prefs
