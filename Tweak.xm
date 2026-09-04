@@ -9,6 +9,7 @@ static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.c
 static BOOL STCEnabled = YES;
 static BOOL STCPullToClearEnabled = YES;
 static CGFloat STCSwipeDistance = 30.0;
+static UINotificationFeedbackGenerator *STCClearFeedback = nil;
 
 @interface NCNotificationStructuredSectionList : NSObject
 - (unsigned long long)sectionType;
@@ -59,10 +60,17 @@ static BOOL STCPullFeatureEnabled(void) {
     return STCEnabled && STCPullToClearEnabled;
 }
 
+static void STCPrepareClearHaptic(void) {
+    if (!STCClearFeedback) {
+        STCClearFeedback = [[UINotificationFeedbackGenerator alloc] init];
+    }
+    [STCClearFeedback prepare];
+}
+
 static void STCPlayClearHaptic(void) {
-    UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
-    [feedback prepare];
-    [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
+    STCPrepareClearHaptic();
+    [STCClearFeedback notificationOccurred:UINotificationFeedbackTypeSuccess];
+    [STCClearFeedback prepare];
 }
 
 static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
@@ -153,6 +161,7 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 
     dispatch_async(dispatch_get_main_queue(), ^{
         STCForceHistoryRevealedIfNeeded(STCStructuredController);
+        if (STCPullFeatureEnabled()) STCPrepareClearHaptic();
     });
 }
 
@@ -161,6 +170,7 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 - (void)viewDidLoad {
     %orig;
     STCInstallCoverSheetPan(self);
+    if (STCPullFeatureEnabled()) STCPrepareClearHaptic();
 }
 
 %new
@@ -170,6 +180,7 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
     UIGestureRecognizerState state = pan.state;
     if (state == UIGestureRecognizerStateBegan) {
         objc_setAssociatedObject(self, &STCDidClearThisPullKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        STCPrepareClearHaptic();
         return;
     }
 
