@@ -10,11 +10,6 @@ static BOOL STCEnabled = YES;
 static BOOL STCPullToClearEnabled = YES;
 static CGFloat STCSwipeDistance = 30.0;
 
-static __weak id STCStructuredController = nil;
-static char STCCoverSheetPanKey;
-static char STCCoverSheetPanDelegateKey;
-static char STCDidClearThisPullKey;
-
 @interface NCNotificationStructuredSectionList : NSObject
 - (unsigned long long)sectionType;
 - (void)clearAll;
@@ -29,11 +24,15 @@ static char STCDidClearThisPullKey;
 
 @interface NCNotificationStructuredListViewController : UIViewController
 - (NCNotificationMasterList *)masterList;
-- (UIScrollView *)masterListView;
 @end
 
 @interface CSCoverSheetViewController : UIViewController
 @end
+
+static __weak NCNotificationStructuredListViewController *STCStructuredController = nil;
+static char STCCoverSheetPanKey;
+static char STCCoverSheetPanDelegateKey;
+static char STCDidClearThisPullKey;
 
 static id STCCopyPreference(NSString *key) {
     CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)key,
@@ -67,19 +66,12 @@ static void STCPlayClearHaptic(void) {
 }
 
 static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
-    if (!controller) return NO;
-
-    NCNotificationMasterList *masterList = [controller masterList];
-    if (!masterList) return NO;
-
-    NCNotificationStructuredSectionList *incoming = [masterList incomingSectionList];
+    NCNotificationStructuredSectionList *incoming = [[controller masterList] incomingSectionList];
     if (!incoming) return NO;
 
-    if (@available(iOS 16.0, *)) {
-        if ([incoming respondsToSelector:@selector(clearAll)]) {
-            [incoming clearAll];
-            return YES;
-        }
+    if ([incoming respondsToSelector:@selector(clearAll)]) {
+        [incoming clearAll];
+        return YES;
     }
 
     if ([incoming respondsToSelector:@selector(clearAllNotificationRequests)]) {
@@ -112,13 +104,7 @@ static NCNotificationStructuredListViewController *STCFindStructuredController(U
         if (found) return found;
     }
 
-    UIViewController *presented = root.presentedViewController;
-    if (presented) {
-        NCNotificationStructuredListViewController *found = STCFindStructuredController(presented);
-        if (found) return found;
-    }
-
-    return nil;
+    return STCFindStructuredController(root.presentedViewController);
 }
 
 @interface STCFullScreenPanDelegate : NSObject <UIGestureRecognizerDelegate>
@@ -128,12 +114,10 @@ static NCNotificationStructuredListViewController *STCFindStructuredController(U
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
     if (!STCPullFeatureEnabled()) return NO;
-    if (![gestureRecognizer isKindOfClass:[UIPanGestureRecognizer class]]) return YES;
 
     UIPanGestureRecognizer *pan = (UIPanGestureRecognizer *)gestureRecognizer;
     CGPoint velocity = [pan velocityInView:pan.view];
-    if (velocity.y <= 0.0) return NO;
-    return fabs(velocity.y) > fabs(velocity.x);
+    return velocity.y > 0.0 && fabs(velocity.y) > fabs(velocity.x);
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
@@ -144,13 +128,7 @@ static NCNotificationStructuredListViewController *STCFindStructuredController(U
 @end
 
 static void STCInstallCoverSheetPan(CSCoverSheetViewController *controller) {
-    if (!controller) return;
-
-    UIPanGestureRecognizer *existing = objc_getAssociatedObject(controller, &STCCoverSheetPanKey);
-    if (existing && existing.view) return;
-
-    UIView *host = controller.view;
-    if (!host) return;
+    if (!controller || objc_getAssociatedObject(controller, &STCCoverSheetPanKey)) return;
 
     STCFullScreenPanDelegate *delegate = [[STCFullScreenPanDelegate alloc] init];
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:controller
@@ -161,7 +139,7 @@ static void STCInstallCoverSheetPan(CSCoverSheetViewController *controller) {
     pan.delaysTouchesEnded = NO;
     pan.maximumNumberOfTouches = 1;
 
-    [host addGestureRecognizer:pan];
+    [controller.view addGestureRecognizer:pan];
     objc_setAssociatedObject(controller, &STCCoverSheetPanKey, pan, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(controller, &STCCoverSheetPanDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
@@ -174,24 +152,13 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
     STCLoadPrefs();
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        NCNotificationStructuredListViewController *controller = STCStructuredController;
-        if (controller) STCForceHistoryRevealedIfNeeded(controller);
+        STCForceHistoryRevealedIfNeeded(STCStructuredController);
     });
 }
 
 %hook CSCoverSheetViewController
 
 - (void)viewDidLoad {
-    %orig;
-    STCInstallCoverSheetPan(self);
-}
-
-- (void)viewWillAppear:(BOOL)animated {
-    %orig;
-    STCInstallCoverSheetPan(self);
-}
-
-- (void)viewDidLayoutSubviews {
     %orig;
     STCInstallCoverSheetPan(self);
 }
@@ -213,30 +180,35 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
         return;
     }
 
-    if (state != UIGestureRecognizerStateChanged) return;
-    if ([objc_getAssociatedObject(self, &STCDidClearThisPullKey) boolValue]) return;
+    if (state != UIGestureRecognizerStateChanged ||
+        [objc_getAssociatedObject(self, &STCDidClearThisPullKey) boolValue]) {
+        return;
+    }
 
     UIView *host = pan.view ?: self.view;
     CGPoint translation = [pan translationInView:host];
     CGPoint velocity = [pan velocityInView:host];
-    BOOL downward = translation.y > 0.0 && translation.y > fabs(translation.x) && velocity.y >= -50.0;
-    if (!downward || translation.y < STCSwipeDistance) return;
 
-    CGPoint currentLocation = [pan locationInView:host];
-    CGFloat startY = currentLocation.y - translation.y;
+    if (translation.y <= 0.0 ||
+        translation.y <= fabs(translation.x) ||
+        velocity.y < -50.0 ||
+        translation.y < STCSwipeDistance) {
+        return;
+    }
+
+    CGFloat startY = [pan locationInView:host].y - translation.y;
     if (startY < 70.0) return;
 
     objc_setAssociatedObject(self, &STCDidClearThisPullKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    NCNotificationStructuredListViewController *target = STCFindStructuredController(self);
-    if (!target) target = STCStructuredController;
+    NCNotificationStructuredListViewController *target = STCFindStructuredController(self) ?: STCStructuredController;
+    if (!target) return;
 
-    if (target) {
-        STCStructuredController = target;
-        STCForceHistoryRevealedIfNeeded(target);
-        if (STCClearNotificationsFromController(target)) {
-            STCPlayClearHaptic();
-        }
+    STCStructuredController = target;
+    STCForceHistoryRevealedIfNeeded(target);
+
+    if (STCClearNotificationsFromController(target)) {
+        STCPlayClearHaptic();
     }
 }
 
@@ -245,18 +217,6 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 %hook NCNotificationStructuredListViewController
 
 - (void)viewDidLoad {
-    %orig;
-    STCStructuredController = self;
-    STCForceHistoryRevealedIfNeeded(self);
-}
-
-- (void)viewWillAppear:(BOOL)animated {
-    %orig;
-    STCStructuredController = self;
-    STCForceHistoryRevealedIfNeeded(self);
-}
-
-- (void)viewDidLayoutSubviews {
     %orig;
     STCStructuredController = self;
     STCForceHistoryRevealedIfNeeded(self);
@@ -298,9 +258,7 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 }
 
 - (BOOL)_isNotificationRequest:(id)request forSectionList:(NCNotificationStructuredSectionList *)sectionList {
-    if (STCEnabled) {
-        return sectionList.sectionType == 2;
-    }
+    if (STCEnabled) return sectionList.sectionType == 2;
     return %orig;
 }
 
