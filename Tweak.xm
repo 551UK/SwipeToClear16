@@ -153,11 +153,17 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 
     CGPoint translation = [pan translationInView:listView];
     CGPoint velocity = [pan velocityInView:listView];
-    CGFloat topOffset = -listView.adjustedContentInset.top;
-    BOOL atTop = listView.contentOffset.y <= (topOffset + 1.0);
     BOOL downward = translation.y > 0.0 && translation.y > fabs(translation.x) && velocity.y >= -50.0;
+    if (!downward) return;
 
-    if (!atTop || !downward || translation.y < STCSwipeDistance) return;
+    // With notification history forced revealed, the old exact-at-top test is
+    // unreliable. Measure the real rubber-band pull instead: once the list is
+    // physically dragged beyond its resting top by the configured distance,
+    // clear immediately.
+    CGFloat restingTop = -listView.adjustedContentInset.top;
+    CGFloat overscroll = MAX(0.0, restingTop - listView.contentOffset.y);
+
+    if (overscroll < STCSwipeDistance) return;
 
     objc_setAssociatedObject(self, &STCDidClearThisPullKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
