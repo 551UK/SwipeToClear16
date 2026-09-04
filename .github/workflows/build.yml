@@ -32,19 +32,19 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.4
+          name: SwipeToClear16-rootless-v1.0.5
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.4
-          name: SwipeToClear16 v1.0.4
+          tag: v1.0.5
+          name: SwipeToClear16 v1.0.5
           body: |
-            Adds KeepItSimple-style pull spinner and clear haptic.
-            Forces notification history to remain revealed while locked to stop the stock tuck/count state.
-            Clears incoming, history and missed notification sections.
+            Reverts the crash-prone v1.0.4 history/reveal hooks.
+            Blocks only iOS 16's interactive notification display-style transition to stop swipe-down Count/tuck mode.
+            Adds the pull spinner and success haptic while keeping the short swipe-to-clear behaviour.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
