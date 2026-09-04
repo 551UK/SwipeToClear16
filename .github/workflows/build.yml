@@ -42,11 +42,18 @@ jobs:
           tag: v1.0.12
           name: SwipeToClear16 v1.0.12
           body: |
-            Keeps the working full-screen clear gesture and no-tuck behavior.
-            Anchors swipe detection to CSCoverSheetViewController so it is available with the Lock Screen itself after a respring.
-            Finds the live notification list controller at swipe time instead of waiting for its startup lifecycle.
+            Clear all Lock Screen notifications with one short downward swipe anywhere on the Lock Screen.
+            Also stops notification tucking and removes the Lock Screen Search UI.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
+
+      - name: Remove old releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh api --paginate repos/${{ github.repository }}/releases --jq '.[] | select(.tag_name != "v1.0.12") | .id'); do
+            gh api --method DELETE repos/${{ github.repository }}/releases/$id
+          done
