@@ -52,7 +52,6 @@ static BOOL STCShouldOverrideNotificationHistory(void) {
 }
 
 static void STCPlayClearHaptic(void) {
-    // Matches KeepItSimple 1.2.5: notification feedback, prepared before firing success.
     UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
     [feedback prepare];
     [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
@@ -240,7 +239,6 @@ static void STCForceVisibleFromStructuredController(id controller) {
         return;
     }
 
-    // Keep the notification controller in the permanently-revealed state throughout the pull.
     STCForceVisibleFromStructuredController(self);
 
     if (translation.y >= STCSpinnerStartDistance && refresh && !refresh.refreshing) {
@@ -258,8 +256,6 @@ static void STCForceVisibleFromStructuredController(id controller) {
         STCPlayClearHaptic();
     }
 
-    // Stop the stock drag at the clear point. Combined with the forced-history hooks below,
-    // this prevents iOS from completing the bottom "X Notifications" tuck transition.
     pan.enabled = NO;
     pan.enabled = YES;
 
@@ -304,7 +300,6 @@ static void STCForceVisibleFromStructuredController(id controller) {
 
 %hook NCNotificationMasterList
 
-// Keep notifications in the incoming/visible list while locked.
 - (void)migrateNotifications {
     if (STCShouldOverrideNotificationHistory()) return;
     %orig;
@@ -371,7 +366,7 @@ static void STCForceVisibleFromStructuredController(id controller) {
 - (void)layoutSubviews {
     %orig;
     if (STCShouldOverrideNotificationHistory()) {
-        self.hidden = YES;
+        ((UIView *)self).hidden = YES;
     }
 }
 
