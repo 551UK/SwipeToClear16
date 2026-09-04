@@ -112,11 +112,21 @@ static BOOL STCClearNotificationsFromController(NCNotificationStructuredListView
 static void STCInstallFullScreenPan(NCNotificationStructuredListViewController *controller) {
     if (!controller) return;
 
-    UIPanGestureRecognizer *existing = objc_getAssociatedObject(controller, &STCFullScreenPanKey);
-    if (existing && existing.view) return;
+    // Install immediately on the controller view, even before it has joined a
+    // UIWindow after SpringBoard starts. As soon as the Lock Screen window is
+    // available, move the exact same recognizer onto that window so the proven
+    // full-screen behavior from v1.0.9/v1.0.10 is preserved.
+    UIView *host = controller.view.window ?: controller.view;
+    if (!host) return;
 
-    UIWindow *window = controller.view.window;
-    if (!window) return;
+    UIPanGestureRecognizer *existing = objc_getAssociatedObject(controller, &STCFullScreenPanKey);
+    if (existing) {
+        if (existing.view != host) {
+            if (existing.view) [existing.view removeGestureRecognizer:existing];
+            [host addGestureRecognizer:existing];
+        }
+        return;
+    }
 
     STCFullScreenPanDelegate *delegate = [[STCFullScreenPanDelegate alloc] init];
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:controller
@@ -127,7 +137,7 @@ static void STCInstallFullScreenPan(NCNotificationStructuredListViewController *
     pan.delaysTouchesEnded = NO;
     pan.maximumNumberOfTouches = 1;
 
-    [window addGestureRecognizer:pan];
+    [host addGestureRecognizer:pan];
     objc_setAssociatedObject(controller, &STCFullScreenPanKey, pan, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(controller, &STCFullScreenPanDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
@@ -162,14 +172,16 @@ static void STCEnsureLockScreenReady(NCNotificationStructuredListViewController 
 static void STCScheduleStartupInstall(NCNotificationStructuredListViewController *controller) {
     if (!controller) return;
 
-    const NSTimeInterval delays[] = {0.0, 0.10, 0.30, 0.65, 1.20, 2.00};
+    // These are now only quick migration checks so the recognizer moves from
+    // the controller view to the Lock Screen window as soon as it exists. The
+    // gesture itself is already installed synchronously in viewDidLoad.
+    const NSTimeInterval delays[] = {0.0, 0.02, 0.05, 0.10, 0.20, 0.40, 0.80};
     const NSUInteger count = sizeof(delays) / sizeof(delays[0]);
 
     for (NSUInteger i = 0; i < count; i++) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[i] * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             if (STCStructuredController != controller) return;
-            if (!controller.view.window) return;
             STCEnsureLockScreenReady(controller);
         });
     }
@@ -192,8 +204,7 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 
 - (void)viewDidLoad {
     %orig;
-    STCStructuredController = self;
-    STCForceHistoryRevealedIfNeeded(self);
+    STCEnsureLockScreenReady(self);
     STCScheduleStartupInstall(self);
 }
 
