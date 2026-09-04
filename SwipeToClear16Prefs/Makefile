@@ -11,7 +11,6 @@ SwipeToClear16Prefs_FRAMEWORKS = Foundation CoreFoundation UIKit
 SwipeToClear16Prefs_PRIVATE_FRAMEWORKS = Preferences
 SwipeToClear16Prefs_INSTALL_PATH = /Library/PreferenceBundles
 SwipeToClear16Prefs_INFOPLIST_FILE = Info.plist
-SwipeToClear16Prefs_RESOURCE_FILES = Resources/Root.plist
 SwipeToClear16Prefs_CFLAGS = -fobjc-arc
 
 include $(THEOS_MAKE_PATH)/bundle.mk
