@@ -32,19 +32,19 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.9
+          name: SwipeToClear16-rootless-v1.0.10
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.9
-          name: SwipeToClear16 v1.0.9
+          tag: v1.0.10
+          name: SwipeToClear16 v1.0.10
           body: |
-            Keeps the working no-tuck behavior from v1.0.8.
-            Moves the clear gesture to the full Lock Screen container so a downward swipe can clear from below the notification list as well as on top of it.
-            Keeps simultaneous system gestures, the short configurable distance, haptic feedback and Lock Screen Search suppression.
+            Keeps the working full-screen clear gesture and no-tuck behavior from v1.0.9.
+            Fixes startup after a respring by attaching the same gesture during Lock Screen layout/appearance and retrying briefly until the Lock Screen window is ready.
+            No passcode open/cancel should be needed before swipe-to-clear starts working.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
