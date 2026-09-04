@@ -8,17 +8,17 @@ static NSString * const STCPrefsDomain = @"com.551.swipetoclear16";
 static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.changed";
 
 static BOOL STCEnabled = YES;
-static BOOL STCDownwardDrag = NO;
-static BOOL STCClearedThisDrag = NO;
-static CGFloat STCTriggerDistance = 16.0;
+static BOOL STCClearedThisPan = NO;
+static const CGFloat STCTriggerDistance = 26.0;
 
 @interface SBLockScreenManager : NSObject
 + (instancetype)sharedInstance;
 - (BOOL)isUILocked;
 @end
 
-@interface NCNotificationMasterList : NSObject
-- (id)delegate;
+@interface NCNotificationStructuredListViewController : UIViewController
+- (id)masterList;
+- (UIScrollView *)masterListView;
 @end
 
 static void STCLoadPrefs(void) {
@@ -46,128 +46,168 @@ static BOOL STCDeviceIsLocked(void) {
     return ((BOOL (*)(id, SEL))objc_msgSend)(manager, @selector(isUILocked));
 }
 
-static unsigned long long STCNotificationCount(id masterList) {
-    if (!masterList) return 0;
-
-    SEL notificationCount = NSSelectorFromString(@"notificationCount");
-    if ([masterList respondsToSelector:notificationCount]) {
-        return ((unsigned long long (*)(id, SEL))objc_msgSend)(masterList, notificationCount);
-    }
-
-    SEL totalCount = NSSelectorFromString(@"totalNotificationCount");
-    if ([masterList respondsToSelector:totalCount]) {
-        return ((unsigned long long (*)(id, SEL))objc_msgSend)(masterList, totalCount);
-    }
-
-    SEL count = NSSelectorFromString(@"count");
-    if ([masterList respondsToSelector:count]) {
-        return ((unsigned long long (*)(id, SEL))objc_msgSend)(masterList, count);
-    }
-
-    // Do not block a supported iOS 16 point release just because its count selector differs.
-    return 1;
+static BOOL STCShouldOverrideNotificationHistory(void) {
+    return STCEnabled && STCDeviceIsLocked();
 }
 
-static void STCClearMasterList(id masterList) {
+static void STCClearNotificationsFromController(id controller) {
+    if (!controller) return;
+
+    SEL masterListSel = NSSelectorFromString(@"masterList");
+    if (![controller respondsToSelector:masterListSel]) return;
+
+    id masterList = ((id (*)(id, SEL))objc_msgSend)(controller, masterListSel);
     if (!masterList) return;
 
-    // iOS 16's NCNotificationMasterListDelegate inherits the list-base clear-all callback.
-    SEL delegateSel = NSSelectorFromString(@"delegate");
-    id delegate = [masterList respondsToSelector:delegateSel]
-        ? ((id (*)(id, SEL))objc_msgSend)(masterList, delegateSel)
+    SEL incomingSel = NSSelectorFromString(@"incomingSectionList");
+    id incomingList = [masterList respondsToSelector:incomingSel]
+        ? ((id (*)(id, SEL))objc_msgSend)(masterList, incomingSel)
         : nil;
 
-    SEL requestsClearAll = NSSelectorFromString(@"notificationListBaseComponentRequestsClearingAll:");
-    if (delegate && [delegate respondsToSelector:requestsClearAll]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(delegate, requestsClearAll, masterList);
+    // This is the exact iOS 16 path used by KeepItSimple 1.2.5.
+    SEL clearAllSel = NSSelectorFromString(@"clearAll");
+    if (incomingList && [incomingList respondsToSelector:clearAllSel]) {
+        ((void (*)(id, SEL))objc_msgSend)(incomingList, clearAllSel);
         return;
     }
 
-    // Fallbacks for neighbouring UserNotificationsUIKit implementations.
-    SEL clearAll = NSSelectorFromString(@"clearAll");
-    if ([masterList respondsToSelector:clearAll]) {
-        ((void (*)(id, SEL))objc_msgSend)(masterList, clearAll);
-        return;
-    }
-
-    SEL privateClear = NSSelectorFromString(@"_clearAllNotifications:supplementaryViewControllers:");
-    if ([masterList respondsToSelector:privateClear]) {
-        ((void (*)(id, SEL, BOOL, BOOL))objc_msgSend)(masterList, privateClear, YES, YES);
-        return;
-    }
-
-    SEL oldClear = NSSelectorFromString(@"notificationListComponentRequestsClearingAllNotificationRequests:");
-    if ([masterList respondsToSelector:oldClear]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(masterList, oldClear, masterList);
+    // Fallback retained for neighbouring UserNotificationsUIKit builds.
+    SEL clearRequestsSel = NSSelectorFromString(@"clearAllNotificationRequests");
+    if (incomingList && [incomingList respondsToSelector:clearRequestsSel]) {
+        ((void (*)(id, SEL))objc_msgSend)(incomingList, clearRequestsSel);
     }
 }
 
-static BOOL STCIsIntentionalDownwardPan(UIScrollView *scrollView) {
-    UIPanGestureRecognizer *pan = scrollView.panGestureRecognizer;
-    if (!pan) return NO;
+%hook NCNotificationStructuredListViewController
+
+- (void)viewDidLoad {
+    %orig;
+
+    UIScrollView *listView = nil;
+    if ([self respondsToSelector:@selector(masterListView)]) {
+        listView = [self masterListView];
+    }
+
+    UIPanGestureRecognizer *pan = listView.panGestureRecognizer;
+    if (pan) {
+        [pan addTarget:self action:@selector(stc_handleNotificationPan:)];
+    }
+}
+
+%new
+- (void)stc_handleNotificationPan:(UIPanGestureRecognizer *)pan {
+    if (!STCShouldOverrideNotificationHistory()) {
+        STCClearedThisPan = NO;
+        return;
+    }
 
     UIGestureRecognizerState state = pan.state;
-    if (state != UIGestureRecognizerStateBegan && state != UIGestureRecognizerStateChanged) return NO;
+    if (state == UIGestureRecognizerStateBegan) {
+        STCClearedThisPan = NO;
+        return;
+    }
 
-    CGPoint translation = [pan translationInView:scrollView];
-    CGPoint velocity = [pan velocityInView:scrollView];
+    if (state == UIGestureRecognizerStateEnded ||
+        state == UIGestureRecognizerStateCancelled ||
+        state == UIGestureRecognizerStateFailed) {
+        STCClearedThisPan = NO;
+        return;
+    }
 
-    BOOL translationDown = translation.y > 0.0 && translation.y > fabs(translation.x);
-    BOOL velocityDown = velocity.y > 0.0 && velocity.y > fabs(velocity.x);
-    return translationDown || velocityDown;
+    if (state != UIGestureRecognizerStateChanged || STCClearedThisPan) return;
+
+    UIView *view = pan.view;
+    CGPoint translation = [pan translationInView:view];
+    CGPoint velocity = [pan velocityInView:view];
+
+    BOOL downward = translation.y > 0.0 &&
+                    translation.y > fabs(translation.x) &&
+                    velocity.y >= -50.0;
+
+    if (!downward || translation.y < STCTriggerDistance) return;
+
+    STCClearedThisPan = YES;
+    STCClearNotificationsFromController(self);
+
+    // End Apple's list pan immediately so it cannot finish the native tuck/count transition.
+    pan.enabled = NO;
+    pan.enabled = YES;
+
+    UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    [feedback impactOccurred];
 }
+
+%end
 
 %hook NCNotificationMasterList
 
-- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
-    STCDownwardDrag = NO;
-    STCClearedThisDrag = NO;
+// KeepItSimple makes the incoming list the single active notification list.
+// Doing the same only while the device is locked removes iOS 16's tuck/history move.
+- (void)migrateNotifications {
+    if (STCShouldOverrideNotificationHistory()) return;
     %orig;
 }
 
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if (!STCEnabled || !STCDeviceIsLocked() || STCNotificationCount(self) == 0) {
-        %orig;
-        return;
-    }
+- (BOOL)_isNotificationRequestForIncomingSection:(id)request {
+    if (STCShouldOverrideNotificationHistory()) return YES;
+    return %orig;
+}
 
-    if (STCIsIntentionalDownwardPan(scrollView)) {
-        STCDownwardDrag = YES;
+- (BOOL)_isNotificationRequestForHistorySection:(id)request {
+    if (STCShouldOverrideNotificationHistory()) return NO;
+    return %orig;
+}
 
-        // Do not pass the downward Lock Screen drag into Apple's native list handler.
-        // That handler is what collapses the notifications into the bottom count indicator.
-        CGPoint translation = [scrollView.panGestureRecognizer translationInView:scrollView];
-        if (!STCClearedThisDrag && translation.y >= STCTriggerDistance) {
-            STCClearedThisDrag = YES;
-            STCClearMasterList(self);
+- (BOOL)_isNotificationRequest:(id)request forSectionList:(id)sectionList {
+    if (STCShouldOverrideNotificationHistory()) {
+        SEL sectionTypeSel = NSSelectorFromString(@"sectionType");
+        if ([sectionList respondsToSelector:sectionTypeSel]) {
+            unsigned long long sectionType = ((unsigned long long (*)(id, SEL))objc_msgSend)(sectionList, sectionTypeSel);
+            return sectionType == 2;
         }
-        return;
+        return NO;
     }
+    return %orig;
+}
 
+- (void)_migrateNotificationsFromList:(id)fromList
+                               toList:(id)toList
+                          passingTest:(id)test
+                           hideToList:(BOOL)hideToList
+                        clearRequests:(BOOL)clearRequests {
+    if (STCShouldOverrideNotificationHistory()) return;
     %orig;
 }
 
-- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView
-                     withVelocity:(CGPoint)velocity
-              targetContentOffset:(CGPoint *)targetContentOffset {
-    if (STCEnabled && STCDeviceIsLocked() && STCDownwardDrag) {
-        // If the user released extremely quickly, still treat it as swipe-to-clear.
-        if (!STCClearedThisDrag && STCNotificationCount(self) > 0) {
-            STCClearedThisDrag = YES;
-            STCClearMasterList(self);
-        }
-
-        // Never let the native end-of-drag path commit the tucked/count state.
-        if (targetContentOffset) *targetContentOffset = scrollView.contentOffset;
-        return;
-    }
-
+- (void)_migrateNotificationsFromList:(id)fromList
+                               toList:(id)toList
+                          passingTest:(id)test
+                           hideToList:(BOOL)hideToList
+                        clearRequests:(BOOL)clearRequests
+             filterPersistentRequests:(BOOL)filterPersistentRequests {
+    if (STCShouldOverrideNotificationHistory()) return;
     %orig;
 }
 
-- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
-    STCDownwardDrag = NO;
-    STCClearedThisDrag = NO;
+- (void)_migrateNotificationsFromList:(id)fromList
+                               toList:(id)toList
+                          passingTest:(id)passingTest
+            filterRequestsPassingTest:(id)filterRequestsPassingTest
+                           hideToList:(BOOL)hideToList
+                        clearRequests:(BOOL)clearRequests
+                 filterForDestination:(BOOL)filterForDestination
+                       animateRemoval:(BOOL)animateRemoval
+           reorderGroupNotifications:(BOOL)reorderGroupNotifications {
+    if (STCShouldOverrideNotificationHistory()) return;
+    %orig;
+}
+
+%end
+
+%hook NCNotificationListSectionRevealHintView
+
+- (void)layoutSubviews {
+    if (STCShouldOverrideNotificationHistory()) return;
     %orig;
 }
 
