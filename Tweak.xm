@@ -10,7 +10,6 @@ static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.c
 static BOOL STCEnabled = YES;
 static BOOL STCClearedThisPan = NO;
 static const CGFloat STCTriggerDistance = 26.0;
-static const CGFloat STCSpinnerStartDistance = 4.0;
 
 @interface SBLockScreenManager : NSObject
 + (instancetype)sharedInstance;
@@ -47,32 +46,8 @@ static BOOL STCDeviceIsLocked(void) {
     return ((BOOL (*)(id, SEL))objc_msgSend)(manager, @selector(isUILocked));
 }
 
-static BOOL STCShouldOverrideNotificationHistory(void) {
+static BOOL STCShouldRun(void) {
     return STCEnabled && STCDeviceIsLocked();
-}
-
-static void STCPlayClearHaptic(void) {
-    UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
-    [feedback prepare];
-    [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
-}
-
-static BOOL STCClearSectionList(id sectionList) {
-    if (!sectionList) return NO;
-
-    SEL clearAllSel = NSSelectorFromString(@"clearAll");
-    if ([sectionList respondsToSelector:clearAllSel]) {
-        ((void (*)(id, SEL))objc_msgSend)(sectionList, clearAllSel);
-        return YES;
-    }
-
-    SEL clearRequestsSel = NSSelectorFromString(@"clearAllNotificationRequests");
-    if ([sectionList respondsToSelector:clearRequestsSel]) {
-        ((void (*)(id, SEL))objc_msgSend)(sectionList, clearRequestsSel);
-        return YES;
-    }
-
-    return NO;
 }
 
 static BOOL STCClearNotificationsFromController(id controller) {
@@ -84,57 +59,30 @@ static BOOL STCClearNotificationsFromController(id controller) {
     id masterList = ((id (*)(id, SEL))objc_msgSend)(controller, masterListSel);
     if (!masterList) return NO;
 
-    BOOL cleared = NO;
-    NSArray<NSString *> *sectionSelectors = @[
-        @"incomingSectionList",
-        @"historySectionList",
-        @"missedSectionList"
-    ];
+    SEL incomingSel = NSSelectorFromString(@"incomingSectionList");
+    id incomingList = [masterList respondsToSelector:incomingSel]
+        ? ((id (*)(id, SEL))objc_msgSend)(masterList, incomingSel)
+        : nil;
 
-    for (NSString *selectorName in sectionSelectors) {
-        SEL sectionSel = NSSelectorFromString(selectorName);
-        if (![masterList respondsToSelector:sectionSel]) continue;
-
-        id sectionList = ((id (*)(id, SEL))objc_msgSend)(masterList, sectionSel);
-        cleared = STCClearSectionList(sectionList) || cleared;
+    SEL clearAllSel = NSSelectorFromString(@"clearAll");
+    if (incomingList && [incomingList respondsToSelector:clearAllSel]) {
+        ((void (*)(id, SEL))objc_msgSend)(incomingList, clearAllSel);
+        return YES;
     }
 
-    if (!cleared) {
-        SEL controllerClearSel = NSSelectorFromString(@"_clearAllNotificationRequests");
-        if ([controller respondsToSelector:controllerClearSel]) {
-            ((void (*)(id, SEL))objc_msgSend)(controller, controllerClearSel);
-            cleared = YES;
-        }
+    SEL clearRequestsSel = NSSelectorFromString(@"clearAllNotificationRequests");
+    if (incomingList && [incomingList respondsToSelector:clearRequestsSel]) {
+        ((void (*)(id, SEL))objc_msgSend)(incomingList, clearRequestsSel);
+        return YES;
     }
 
-    return cleared;
+    return NO;
 }
 
-static void STCForceHistoryVisibleOnObject(id object) {
-    if (!object || !STCShouldOverrideNotificationHistory()) return;
-
-    SEL forceSel = NSSelectorFromString(@"forceNotificationHistoryRevealed:animated:");
-    if ([object respondsToSelector:forceSel]) {
-        ((void (*)(id, SEL, BOOL, BOOL))objc_msgSend)(object, forceSel, YES, NO);
-        return;
-    }
-
-    SEL revealSel = NSSelectorFromString(@"revealNotificationHistory:animated:");
-    if ([object respondsToSelector:revealSel]) {
-        ((void (*)(id, SEL, BOOL, BOOL))objc_msgSend)(object, revealSel, YES, NO);
-    }
-}
-
-static void STCForceVisibleFromStructuredController(id controller) {
-    if (!controller || !STCShouldOverrideNotificationHistory()) return;
-
-    STCForceHistoryVisibleOnObject(controller);
-
-    SEL delegateSel = NSSelectorFromString(@"delegate");
-    if ([controller respondsToSelector:delegateSel]) {
-        id delegate = ((id (*)(id, SEL))objc_msgSend)(controller, delegateSel);
-        STCForceHistoryVisibleOnObject(delegate);
-    }
+static void STCPlayClearHaptic(void) {
+    UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
+    [feedback prepare];
+    [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
 }
 
 %hook NCNotificationStructuredListViewController
@@ -149,6 +97,8 @@ static void STCForceVisibleFromStructuredController(id controller) {
 
     if (!listView) return;
 
+    // KeepItSimple-style pull indicator. We only use the stock refresh control UI;
+    // the short 26pt clear threshold still comes from our pan handler below.
     UIRefreshControl *refresh = listView.refreshControl;
     if (!refresh) {
         refresh = [[UIRefreshControl alloc] init];
@@ -156,7 +106,6 @@ static void STCForceVisibleFromStructuredController(id controller) {
         refresh.transform = CGAffineTransformMakeScale(0.78, 0.78);
         listView.refreshControl = refresh;
     }
-
     [refresh addTarget:self action:@selector(stc_refreshTriggered:) forControlEvents:UIControlEventValueChanged];
 
     UIPanGestureRecognizer *pan = listView.panGestureRecognizer;
@@ -165,66 +114,38 @@ static void STCForceVisibleFromStructuredController(id controller) {
     }
 }
 
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    STCForceVisibleFromStructuredController(self);
-}
-
-- (void)revealNotificationHistory:(BOOL)revealed animated:(BOOL)animated {
-    if (STCShouldOverrideNotificationHistory()) {
-        %orig(YES, NO);
-        return;
-    }
-    %orig;
-}
-
 %new
 - (void)stc_refreshTriggered:(UIRefreshControl *)refresh {
-    if (!STCShouldOverrideNotificationHistory()) {
-        [refresh endRefreshing];
-        return;
-    }
-
-    if (!STCClearedThisPan) {
+    if (STCShouldRun() && !STCClearedThisPan) {
         STCClearedThisPan = YES;
         if (STCClearNotificationsFromController(self)) {
             STCPlayClearHaptic();
         }
     }
-
     [refresh endRefreshing];
-    STCForceVisibleFromStructuredController(self);
 }
 
 %new
 - (void)stc_handleNotificationPan:(UIPanGestureRecognizer *)pan {
-    UIScrollView *listView = (UIScrollView *)pan.view;
-    UIRefreshControl *refresh = [listView isKindOfClass:[UIScrollView class]] ? listView.refreshControl : nil;
-
-    if (!STCShouldOverrideNotificationHistory()) {
+    if (!STCShouldRun()) {
         STCClearedThisPan = NO;
-        if (refresh.refreshing) [refresh endRefreshing];
         return;
     }
 
     UIGestureRecognizerState state = pan.state;
-
     if (state == UIGestureRecognizerStateBegan) {
         STCClearedThisPan = NO;
-        STCForceVisibleFromStructuredController(self);
         return;
     }
 
     if (state == UIGestureRecognizerStateEnded ||
         state == UIGestureRecognizerStateCancelled ||
         state == UIGestureRecognizerStateFailed) {
-        if (refresh.refreshing) [refresh endRefreshing];
         STCClearedThisPan = NO;
-        STCForceVisibleFromStructuredController(self);
         return;
     }
 
-    if (state != UIGestureRecognizerStateChanged) return;
+    if (state != UIGestureRecognizerStateChanged || STCClearedThisPan) return;
 
     UIView *view = pan.view;
     CGPoint translation = [pan translationInView:view];
@@ -234,66 +155,21 @@ static void STCForceVisibleFromStructuredController(id controller) {
                     translation.y > fabs(translation.x) &&
                     velocity.y >= -50.0;
 
-    if (!downward) {
-        if (refresh.refreshing) [refresh endRefreshing];
-        return;
-    }
-
-    STCForceVisibleFromStructuredController(self);
-
-    if (translation.y >= STCSpinnerStartDistance && refresh && !refresh.refreshing) {
-        [refresh beginRefreshing];
-    }
-
-    if (STCClearedThisPan || translation.y < STCTriggerDistance) return;
+    if (!downward || translation.y < STCTriggerDistance) return;
 
     STCClearedThisPan = YES;
     BOOL cleared = STCClearNotificationsFromController(self);
 
-    if (refresh.refreshing) [refresh endRefreshing];
-
-    if (cleared) {
-        STCPlayClearHaptic();
+    UIScrollView *listView = [view isKindOfClass:[UIScrollView class]] ? (UIScrollView *)view : nil;
+    if (listView.refreshControl.refreshing) {
+        [listView.refreshControl endRefreshing];
     }
 
+    if (cleared) STCPlayClearHaptic();
+
+    // Same stable gesture cancellation used in v1.0.3.
     pan.enabled = NO;
     pan.enabled = YES;
-
-    STCForceVisibleFromStructuredController(self);
-}
-
-%end
-
-%hook CSCombinedListViewController
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    STCForceHistoryVisibleOnObject(self);
-}
-
-- (void)forceNotificationHistoryRevealed:(BOOL)revealed animated:(BOOL)animated {
-    if (STCShouldOverrideNotificationHistory()) {
-        %orig(YES, NO);
-        return;
-    }
-    %orig;
-}
-
-%end
-
-%hook NCNotificationCombinedListViewController
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    STCForceHistoryVisibleOnObject(self);
-}
-
-- (void)forceNotificationHistoryRevealed:(BOOL)revealed animated:(BOOL)animated {
-    if (STCShouldOverrideNotificationHistory()) {
-        %orig(YES, NO);
-        return;
-    }
-    %orig;
 }
 
 %end
@@ -301,22 +177,22 @@ static void STCForceVisibleFromStructuredController(id controller) {
 %hook NCNotificationMasterList
 
 - (void)migrateNotifications {
-    if (STCShouldOverrideNotificationHistory()) return;
+    if (STCShouldRun()) return;
     %orig;
 }
 
 - (BOOL)_isNotificationRequestForIncomingSection:(id)request {
-    if (STCShouldOverrideNotificationHistory()) return YES;
+    if (STCShouldRun()) return YES;
     return %orig;
 }
 
 - (BOOL)_isNotificationRequestForHistorySection:(id)request {
-    if (STCShouldOverrideNotificationHistory()) return NO;
+    if (STCShouldRun()) return NO;
     return %orig;
 }
 
 - (BOOL)_isNotificationRequest:(id)request forSectionList:(id)sectionList {
-    if (STCShouldOverrideNotificationHistory()) {
+    if (STCShouldRun()) {
         SEL sectionTypeSel = NSSelectorFromString(@"sectionType");
         if ([sectionList respondsToSelector:sectionTypeSel]) {
             unsigned long long sectionType = ((unsigned long long (*)(id, SEL))objc_msgSend)(sectionList, sectionTypeSel);
@@ -332,7 +208,7 @@ static void STCForceVisibleFromStructuredController(id controller) {
                           passingTest:(id)test
                            hideToList:(BOOL)hideToList
                         clearRequests:(BOOL)clearRequests {
-    if (STCShouldOverrideNotificationHistory()) return;
+    if (STCShouldRun()) return;
     %orig;
 }
 
@@ -342,7 +218,7 @@ static void STCForceVisibleFromStructuredController(id controller) {
                            hideToList:(BOOL)hideToList
                         clearRequests:(BOOL)clearRequests
              filterPersistentRequests:(BOOL)filterPersistentRequests {
-    if (STCShouldOverrideNotificationHistory()) return;
+    if (STCShouldRun()) return;
     %orig;
 }
 
@@ -355,7 +231,7 @@ static void STCForceVisibleFromStructuredController(id controller) {
                  filterForDestination:(BOOL)filterForDestination
                        animateRemoval:(BOOL)animateRemoval
            reorderGroupNotifications:(BOOL)reorderGroupNotifications {
-    if (STCShouldOverrideNotificationHistory()) return;
+    if (STCShouldRun()) return;
     %orig;
 }
 
@@ -364,33 +240,7 @@ static void STCForceVisibleFromStructuredController(id controller) {
 %hook NCNotificationListSectionRevealHintView
 
 - (void)layoutSubviews {
-    %orig;
-    if (STCShouldOverrideNotificationHistory()) {
-        ((UIView *)self).hidden = YES;
-    }
-}
-
-- (void)setRevealPercentage:(double)percentage {
-    if (STCShouldOverrideNotificationHistory()) {
-        %orig(0.0);
-        return;
-    }
-    %orig;
-}
-
-- (void)setForceRevealed:(BOOL)revealed {
-    if (STCShouldOverrideNotificationHistory()) {
-        %orig(NO);
-        return;
-    }
-    %orig;
-}
-
-- (void)setHintingAlpha:(double)alpha {
-    if (STCShouldOverrideNotificationHistory()) {
-        %orig(0.0);
-        return;
-    }
+    if (STCShouldRun()) return;
     %orig;
 }
 
