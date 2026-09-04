@@ -11,7 +11,8 @@ static BOOL STCPullToClearEnabled = YES;
 static CGFloat STCSwipeDistance = 30.0;
 
 static __weak id STCStructuredController = nil;
-static char STCPanTargetInstalledKey;
+static char STCFullScreenPanKey;
+static char STCFullScreenPanDelegateKey;
 static char STCDidClearThisPullKey;
 
 @interface NCNotificationStructuredSectionList : NSObject
@@ -86,16 +87,60 @@ static BOOL STCClearNotificationsFromController(NCNotificationStructuredListView
     return NO;
 }
 
-static void STCInstallPanTarget(NCNotificationStructuredListViewController *controller) {
+@interface STCFullScreenPanDelegate : NSObject <UIGestureRecognizerDelegate>
+@end
+
+@implementation STCFullScreenPanDelegate
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if (!STCPullFeatureEnabled()) return NO;
+    if (![gestureRecognizer isKindOfClass:[UIPanGestureRecognizer class]]) return YES;
+
+    UIPanGestureRecognizer *pan = (UIPanGestureRecognizer *)gestureRecognizer;
+    CGPoint velocity = [pan velocityInView:pan.view];
+    if (velocity.y <= 0.0) return NO;
+    return fabs(velocity.y) > fabs(velocity.x);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+        shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    return YES;
+}
+
+@end
+
+static void STCInstallFullScreenPan(NCNotificationStructuredListViewController *controller) {
     if (!controller) return;
-    if (objc_getAssociatedObject(controller, &STCPanTargetInstalledKey)) return;
 
-    UIScrollView *listView = [controller masterListView];
-    UIPanGestureRecognizer *pan = listView.panGestureRecognizer;
-    if (!pan) return;
+    UIPanGestureRecognizer *existing = objc_getAssociatedObject(controller, &STCFullScreenPanKey);
+    if (existing && existing.view) return;
 
-    [pan addTarget:controller action:@selector(stc_shortPullPan:)];
-    objc_setAssociatedObject(controller, &STCPanTargetInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    UIWindow *window = controller.view.window;
+    if (!window) return;
+
+    STCFullScreenPanDelegate *delegate = [[STCFullScreenPanDelegate alloc] init];
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:controller
+                                                                         action:@selector(stc_fullScreenPullPan:)];
+    pan.delegate = delegate;
+    pan.cancelsTouchesInView = NO;
+    pan.delaysTouchesBegan = NO;
+    pan.delaysTouchesEnded = NO;
+    pan.maximumNumberOfTouches = 1;
+
+    [window addGestureRecognizer:pan];
+    objc_setAssociatedObject(controller, &STCFullScreenPanKey, pan, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(controller, &STCFullScreenPanDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void STCRemoveFullScreenPan(NCNotificationStructuredListViewController *controller) {
+    if (!controller) return;
+
+    UIPanGestureRecognizer *pan = objc_getAssociatedObject(controller, &STCFullScreenPanKey);
+    if (pan.view) [pan.view removeGestureRecognizer:pan];
+
+    objc_setAssociatedObject(controller, &STCFullScreenPanKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(controller, &STCFullScreenPanDelegateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(controller, &STCDidClearThisPullKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static void STCForceHistoryRevealedIfNeeded(NCNotificationStructuredListViewController *controller) {
@@ -125,45 +170,52 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
 - (void)viewDidLoad {
     %orig;
     STCStructuredController = self;
-    STCInstallPanTarget(self);
     STCForceHistoryRevealedIfNeeded(self);
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    STCStructuredController = self;
+    STCInstallFullScreenPan(self);
+    STCForceHistoryRevealedIfNeeded(self);
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    STCRemoveFullScreenPan(self);
+    %orig;
+}
+
 %new
-- (void)stc_shortPullPan:(UIPanGestureRecognizer *)pan {
+- (void)stc_fullScreenPullPan:(UIPanGestureRecognizer *)pan {
     if (!STCPullFeatureEnabled()) return;
 
-    if (pan.state == UIGestureRecognizerStateBegan) {
+    UIGestureRecognizerState state = pan.state;
+    if (state == UIGestureRecognizerStateBegan) {
         objc_setAssociatedObject(self, &STCDidClearThisPullKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         return;
     }
 
-    if (pan.state == UIGestureRecognizerStateEnded ||
-        pan.state == UIGestureRecognizerStateCancelled ||
-        pan.state == UIGestureRecognizerStateFailed) {
+    if (state == UIGestureRecognizerStateEnded ||
+        state == UIGestureRecognizerStateCancelled ||
+        state == UIGestureRecognizerStateFailed) {
         objc_setAssociatedObject(self, &STCDidClearThisPullKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         return;
     }
 
-    if (pan.state != UIGestureRecognizerStateChanged) return;
+    if (state != UIGestureRecognizerStateChanged) return;
     if ([objc_getAssociatedObject(self, &STCDidClearThisPullKey) boolValue]) return;
 
-    UIScrollView *listView = [pan.view isKindOfClass:[UIScrollView class]] ? (UIScrollView *)pan.view : [self masterListView];
-    if (!listView) return;
-
-    CGPoint translation = [pan translationInView:listView];
-    CGPoint velocity = [pan velocityInView:listView];
+    UIView *host = pan.view ?: self.view;
+    CGPoint translation = [pan translationInView:host];
+    CGPoint velocity = [pan velocityInView:host];
     BOOL downward = translation.y > 0.0 && translation.y > fabs(translation.x) && velocity.y >= -50.0;
-    if (!downward) return;
+    if (!downward || translation.y < STCSwipeDistance) return;
 
-    // With notification history forced revealed, the old exact-at-top test is
-    // unreliable. Measure the real rubber-band pull instead: once the list is
-    // physically dragged beyond its resting top by the configured distance,
-    // clear immediately.
-    CGFloat restingTop = -listView.adjustedContentInset.top;
-    CGFloat overscroll = MAX(0.0, restingTop - listView.contentOffset.y);
-
-    if (overscroll < STCSwipeDistance) return;
+    // Do not steal top-edge Control Center/status-bar pulls. Everywhere else on
+    // the Lock Screen is valid, including the empty area below notifications.
+    CGPoint currentLocation = [pan locationInView:host];
+    CGFloat startY = currentLocation.y - translation.y;
+    if (startY < 70.0) return;
 
     objc_setAssociatedObject(self, &STCDidClearThisPullKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
