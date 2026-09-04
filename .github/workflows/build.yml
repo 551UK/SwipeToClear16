@@ -32,19 +32,19 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.6
+          name: SwipeToClear16-rootless-v1.0.7
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.6
-          name: SwipeToClear16 v1.0.6
+          tag: v1.0.7
+          name: SwipeToClear16 v1.0.7
           body: |
-            Reimplements the full KeepItSimple 1.2.5 notification-list behavior.
-            Adds the same pull indicator, color and position settings, haptic, single-list migration hooks and CoverSheet Search suppression.
-            Uses a shorter configurable pull distance without cancelling the system pan gesture.
+            Removes the loading circle and its settings.
+            Keeps the short pull, success haptic and Lock Screen Search suppression.
+            Forces notification history to remain revealed while enabled to prevent the hidden/tucked state that required a first reveal swipe.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
