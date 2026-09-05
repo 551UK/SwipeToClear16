@@ -10,7 +10,7 @@
         <key>detail</key><string>STCRootListController</string>
         <key>controller</key><string>STCRootListController</string>
         <key>isController</key><true/>
-        <key>iconImageSystem</key><string>bell.slash.fill</string>
+        <key>icon</key><string>SwipeToClear16.png</string>
     </dict>
 </dict>
 </plist>
