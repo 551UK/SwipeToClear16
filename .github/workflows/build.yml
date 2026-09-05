@@ -48,3 +48,13 @@ jobs:
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
+
+      - name: Remove older releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/releases" --jq '.[] | [.id, .tag_name] | @tsv' | while IFS=$'\t' read -r id tag; do
+            if [ "$tag" != "v1.0.17" ]; then
+              gh api --method DELETE "repos/${{ github.repository }}/releases/$id"
+            fi
+          done
