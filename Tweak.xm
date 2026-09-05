@@ -1,6 +1,5 @@
 #import <UIKit/UIKit.h>
 #import <CoreFoundation/CoreFoundation.h>
-#import <CoreHaptics/CoreHaptics.h>
 #import <objc/runtime.h>
 #import <math.h>
 
@@ -10,7 +9,6 @@ static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.c
 static BOOL STCEnabled = YES;
 static BOOL STCPullToClearEnabled = YES;
 static CGFloat STCSwipeDistance = 30.0;
-static CHHapticEngine *STCHapticEngine = nil;
 
 @interface NCNotificationStructuredSectionList : NSObject
 - (unsigned long long)sectionType;
@@ -61,53 +59,10 @@ static BOOL STCPullFeatureEnabled(void) {
     return STCEnabled && STCPullToClearEnabled;
 }
 
-static void STCPlayOriginalSuccessFallback(void) {
-    UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
-    [feedback prepare];
-    [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
-}
-
 static void STCPlayClearHaptic(void) {
-    if (![CHHapticEngine capabilitiesForHardware].supportsHaptics) {
-        STCPlayOriginalSuccessFallback();
-        return;
-    }
-
-    NSError *error = nil;
-    if (!STCHapticEngine) {
-        STCHapticEngine = [[CHHapticEngine alloc] initAndReturnError:&error];
-        STCHapticEngine.autoShutdownEnabled = YES;
-    }
-
-    if (!STCHapticEngine || ![STCHapticEngine startAndReturnError:&error]) {
-        STCPlayOriginalSuccessFallback();
-        return;
-    }
-
-    CHHapticEventParameter *intensity1 = [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity value:0.72f];
-    CHHapticEventParameter *sharpness1 = [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticSharpness value:0.45f];
-    CHHapticEventParameter *intensity2 = [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity value:0.94f];
-    CHHapticEventParameter *sharpness2 = [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticSharpness value:0.62f];
-
-    CHHapticEvent *first = [[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticTransient
-                                                       parameters:@[intensity1, sharpness1]
-                                                     relativeTime:0.0];
-    CHHapticEvent *second = [[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticTransient
-                                                        parameters:@[intensity2, sharpness2]
-                                                      relativeTime:0.075];
-
-    CHHapticPattern *pattern = [[CHHapticPattern alloc] initWithEvents:@[first, second]
-                                                            parameters:@[]
-                                                                 error:&error];
-    if (!pattern) {
-        STCPlayOriginalSuccessFallback();
-        return;
-    }
-
-    id<CHHapticPatternPlayer> player = [STCHapticEngine createPlayerWithPattern:pattern error:&error];
-    if (!player || ![player startAtTime:CHHapticTimeImmediate error:&error]) {
-        STCPlayOriginalSuccessFallback();
-    }
+    UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
+    [feedback prepare];
+    [feedback impactOccurredWithIntensity:1.0];
 }
 
 static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
