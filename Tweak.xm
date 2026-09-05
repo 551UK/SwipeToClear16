@@ -60,9 +60,9 @@ static BOOL STCPullFeatureEnabled(void) {
 }
 
 static void STCPlayClearHaptic(void) {
-    UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
+    UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
     [feedback prepare];
-    [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
+    [feedback impactOccurredWithIntensity:1.0];
 }
 
 static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
