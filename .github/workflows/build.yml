@@ -20,6 +20,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Generate settings icon
+        run: |
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          data = base64.b64decode(Path('assets/SwipeToClear16.png.b64').read_text())
+          targets = [
+              Path('layout/Library/PreferenceLoader/Preferences/SwipeToClear16.png'),
+              Path('SwipeToClear16Prefs/layout/Library/PreferenceLoader/Preferences/SwipeToClear16.png'),
+              Path('SwipeToClear16Prefs/Resources/icon.png'),
+          ]
+          for target in targets:
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+          PY
+
       - name: Set up Theos
         uses: Randomblock1/theos-action@v1
         with:
@@ -32,19 +48,17 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.13
+          name: SwipeToClear16-rootless-v1.0.14
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.13
-          name: SwipeToClear16 v1.0.13
+          tag: v1.0.14
+          name: SwipeToClear16 v1.0.14
           body: |
-            Clear all Lock Screen notifications with one short downward swipe anywhere on the Lock Screen.
-            Also stops notification tucking and removes the Lock Screen Search UI.
-            Adds an icon for SwipeToClear16 in Settings.
+            Fixes the SwipeToClear16 icon in the iOS Settings tweak list.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
