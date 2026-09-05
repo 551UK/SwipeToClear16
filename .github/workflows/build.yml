@@ -32,18 +32,17 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.15
+          name: SwipeToClear16-rootless-v1.0.17
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.15
-          name: SwipeToClear16 v1.0.15
+          tag: v1.0.17
+          name: SwipeToClear16 v1.0.17
           body: |
-            Clear all Lock Screen notifications with one short downward swipe anywhere on the Lock Screen.
-            Also stops notification tucking and removes the Lock Screen Search UI.
+            Updated Settings icon.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
