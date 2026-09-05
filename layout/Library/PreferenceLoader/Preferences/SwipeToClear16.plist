@@ -10,7 +10,9 @@
         <key>detail</key><string>STCRootListController</string>
         <key>controller</key><string>STCRootListController</string>
         <key>isController</key><true/>
-        <key>icon</key><string>SwipeToClear16.png</string>
+        <key>icon</key><string>/var/jb/Library/PreferenceLoader/Preferences/SwipeToClear16.png</string>
+        <key>iconImage</key><string>/var/jb/Library/PreferenceLoader/Preferences/SwipeToClear16.png</string>
+        <key>iconImageSystem</key><string>rectangle.stack.badge.minus</string>
     </dict>
 </dict>
 </plist>
