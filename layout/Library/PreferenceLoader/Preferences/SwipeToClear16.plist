@@ -4,15 +4,13 @@
 <dict>
     <key>entry</key>
     <dict>
-        <key>cell</key><string>PSLinkCell</string>
-        <key>label</key><string>SwipeToClear16</string>
         <key>bundle</key><string>SwipeToClear16Prefs</string>
+        <key>cell</key><string>PSLinkCell</string>
+        <key>icon</key><string>icon.png</string>
+        <key>isController</key><true/>
+        <key>label</key><string>SwipeToClear16</string>
         <key>detail</key><string>STCRootListController</string>
         <key>controller</key><string>STCRootListController</string>
-        <key>isController</key><true/>
-        <key>icon</key><string>/var/jb/Library/PreferenceLoader/Preferences/SwipeToClear16.png</string>
-        <key>iconImage</key><string>/var/jb/Library/PreferenceLoader/Preferences/SwipeToClear16.png</string>
-        <key>iconImageSystem</key><string>rectangle.stack.badge.minus</string>
     </dict>
 </dict>
 </plist>
