@@ -6,4 +6,6 @@ Also stops notification tucking and removes the Lock Screen Search UI.
 
 Rootless iOS 16 / Dopamine.
 
+Includes a Settings icon.
+
 Made by 551.
