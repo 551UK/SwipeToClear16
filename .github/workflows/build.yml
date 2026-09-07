@@ -20,6 +20,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Size Settings icon correctly
+        run: sips -z 29 29 layout/Library/PreferenceLoader/Preferences/SwipeToClear16.png >/dev/null
+
       - name: Set up Theos
         uses: Randomblock1/theos-action@v1
         with:
