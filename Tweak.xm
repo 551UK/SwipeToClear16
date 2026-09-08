@@ -96,7 +96,7 @@ static void STCPlayClearHaptic(void) {
                     initWithParameterID:CHHapticEventParameterIDHapticSharpness value:0.5];
                 CHHapticEvent *pulse = [[CHHapticEvent alloc]
                     initWithEventType:CHHapticEventTypeHapticContinuous
-                    parameters:@[intensity, sharpness] relativeTime:0.0 duration:0.12];
+                    parameters:@[intensity, sharpness] relativeTime:0.0 duration:0.10];
                 CHHapticPattern *pattern = [[CHHapticPattern alloc]
                     initWithEvents:@[pulse] parameters:@[] error:&error];
                 player = pattern ? [engine createPlayerWithPattern:pattern error:&error] : nil;
