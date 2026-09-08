@@ -4,6 +4,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <spawn.h>
 #import <unistd.h>
+#import <math.h>
 
 extern char **environ;
 
@@ -93,6 +94,15 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
     [distance setProperty:@YES forKey:@"showValue"];
     [specifiers addObject:distance];
 
+    PSSpecifier *vibrationGroup = [PSSpecifier groupSpecifierWithName:@"Vibration"];
+    [vibrationGroup setProperty:@"Tap to type a duration from 1 to 1000 milliseconds. Default: 100 ms. Changes apply immediately." forKey:@"footerText"];
+    [specifiers addObject:vibrationGroup];
+    PSSpecifier *vibration = [self preferenceSpecifierNamed:
+        [NSString stringWithFormat:@"Vibration Duration: %ld ms", (long)[self vibrationDurationMS]]
+        cell:PSButtonCell key:@"hapticDurationMS" defaultValue:@100];
+    [vibration setButtonAction:@selector(editVibrationDuration:)];
+    [specifiers addObject:vibration];
+
     [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Actions"]];
 
     PSSpecifier *respring = [PSSpecifier preferenceSpecifierNamed:@"Respring"
@@ -125,6 +135,49 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
 - (NSArray *)specifiers {
     if (!_specifiers) _specifiers = [[self manualSpecifiers] copy];
     return _specifiers;
+}
+
+- (NSInteger)vibrationDurationMS {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)STCPrefsDomain);
+    id value = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("hapticDurationMS"),
+                                                         (__bridge CFStringRef)STCPrefsDomain));
+    double milliseconds = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 100.0;
+    return isfinite(milliseconds) && milliseconds >= 1.0 && milliseconds <= 1000.0 ? (NSInteger)milliseconds : 100;
+}
+
+- (BOOL)isValidVibrationText:(NSString *)text {
+    return text.length > 0 &&
+        [text rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789"] invertedSet]].location == NSNotFound &&
+        text.doubleValue >= 1.0 && text.doubleValue <= 1000.0;
+}
+
+- (void)vibrationTextChanged:(UITextField *)textField {
+    UIAlertController *alert = (UIAlertController *)self.presentedViewController;
+    if ([alert isKindOfClass:UIAlertController.class]) {
+        alert.actions.lastObject.enabled = [self isValidVibrationText:textField.text];
+    }
+}
+
+- (void)editVibrationDuration:(PSSpecifier *)specifier {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Vibration Duration (ms)"
+        message:@"Enter a whole number from 1 to 1000. Default: 100 ms."
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.keyboardType = UIKeyboardTypeNumberPad;
+        field.text = [NSString stringWithFormat:@"%ld", (long)[self vibrationDurationMS]];
+        field.placeholder = @"100";
+        [field addTarget:self action:@selector(vibrationTextChanged:) forControlEvents:UIControlEventEditingChanged];
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    __weak UIAlertController *weakAlert = alert;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *text = weakAlert.textFields.firstObject.text;
+        if (![self isValidVibrationText:text]) return;
+        [self setPreferenceValue:@(text.integerValue) specifier:specifier];
+        _specifiers = nil;
+        [self reloadSpecifiers];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (id)readPreferenceValue:(PSSpecifier *)specifier {

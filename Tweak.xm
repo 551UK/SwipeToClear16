@@ -10,6 +10,7 @@ static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.c
 static BOOL STCEnabled = YES;
 static BOOL STCPullToClearEnabled = YES;
 static CGFloat STCSwipeDistance = 30.0;
+static double STCHapticDurationMS = 100.0;
 
 @interface NCNotificationStructuredSectionList : NSObject
 - (unsigned long long)sectionType;
@@ -47,6 +48,7 @@ static void STCLoadPrefs(void) {
     id enabled = STCCopyPreference(@"Enabled");
     id pull = STCCopyPreference(@"pullToClearEnabled");
     id swipeDistance = STCCopyPreference(@"swipeDistance");
+    id hapticDuration = STCCopyPreference(@"hapticDurationMS");
 
     STCEnabled = enabled ? [enabled boolValue] : YES;
     STCPullToClearEnabled = pull ? [pull boolValue] : YES;
@@ -54,6 +56,8 @@ static void STCLoadPrefs(void) {
 
     if (STCSwipeDistance < 10.0) STCSwipeDistance = 10.0;
     if (STCSwipeDistance > 120.0) STCSwipeDistance = 120.0;
+    double milliseconds = [hapticDuration respondsToSelector:@selector(doubleValue)] ? [hapticDuration doubleValue] : 100.0;
+    STCHapticDurationMS = isfinite(milliseconds) && milliseconds >= 1.0 && milliseconds <= 1000.0 ? milliseconds : 100.0;
 }
 
 static BOOL STCPullFeatureEnabled(void) {
@@ -67,6 +71,7 @@ static void STCPlayFallbackHaptic(void) {
 }
 
 static void STCPlayClearHaptic(void) {
+    const NSTimeInterval duration = STCHapticDurationMS / 1000.0;
     // Keep engine startup off SpringBoard's UI thread. One continuous pulse
     // gives the clear gesture more weight than the already-maximal UIKit tap.
     static dispatch_queue_t hapticQueue;
@@ -96,7 +101,7 @@ static void STCPlayClearHaptic(void) {
                     initWithParameterID:CHHapticEventParameterIDHapticSharpness value:0.5];
                 CHHapticEvent *pulse = [[CHHapticEvent alloc]
                     initWithEventType:CHHapticEventTypeHapticContinuous
-                    parameters:@[intensity, sharpness] relativeTime:0.0 duration:0.10];
+                    parameters:@[intensity, sharpness] relativeTime:0.0 duration:duration];
                 CHHapticPattern *pattern = [[CHHapticPattern alloc]
                     initWithEvents:@[pulse] parameters:@[] error:&error];
                 player = pattern ? [engine createPlayerWithPattern:pattern error:&error] : nil;
@@ -197,9 +202,8 @@ static void STCPrefsChangedCallback(CFNotificationCenterRef center,
                                     CFStringRef name,
                                     const void *object,
                                     CFDictionaryRef userInfo) {
-    STCLoadPrefs();
-
     dispatch_async(dispatch_get_main_queue(), ^{
+        STCLoadPrefs();
         STCForceHistoryRevealedIfNeeded(STCStructuredController);
     });
 }
