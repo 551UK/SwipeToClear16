@@ -35,17 +35,17 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.21
+          name: SwipeToClear16-rootless-v1.0.22
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.21
-          name: SwipeToClear16 v1.0.21
+          tag: v1.0.22
+          name: SwipeToClear16 v1.0.22
           body: |
-            Restores the single short heavy haptic when notifications are cleared.
+            Stronger swipe feedback with one full-intensity 120 ms haptic pulse when notifications are cleared.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate "repos/${{ github.repository }}/releases" --jq '.[] | [.id, .tag_name] | @tsv' | while IFS=$'\t' read -r id tag; do
-            if [ "$tag" != "v1.0.21" ]; then
+            if [ "$tag" != "v1.0.22" ]; then
               gh api --method DELETE "repos/${{ github.repository }}/releases/$id"
             fi
           done

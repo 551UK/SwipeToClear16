@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <CoreHaptics/CoreHaptics.h>
 #import <objc/runtime.h>
 #import <math.h>
 
@@ -59,10 +60,57 @@ static BOOL STCPullFeatureEnabled(void) {
     return STCEnabled && STCPullToClearEnabled;
 }
 
-static void STCPlayClearHaptic(void) {
+static void STCPlayFallbackHaptic(void) {
     UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
     [feedback prepare];
     [feedback impactOccurredWithIntensity:1.0];
+}
+
+static void STCPlayClearHaptic(void) {
+    // Keep engine startup off SpringBoard's UI thread. One continuous pulse
+    // gives the clear gesture more weight than the already-maximal UIKit tap.
+    static dispatch_queue_t hapticQueue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        hapticQueue = dispatch_queue_create("com.551.swipetoclear16.haptics", DISPATCH_QUEUE_SERIAL);
+    });
+
+    dispatch_async(hapticQueue, ^{
+        static CHHapticEngine *engine;
+        static id<CHHapticPatternPlayer> player;
+        NSError *error = nil;
+
+        if ([CHHapticEngine capabilitiesForHardware].supportsHaptics) {
+            if (!engine) {
+                engine = [[CHHapticEngine alloc] initAndReturnError:&error];
+                engine.playsHapticsOnly = YES;
+                engine.autoShutdownEnabled = YES;
+            }
+
+            // Restart after idle shutdown or interruption, and create a fresh
+            // player so a haptic-server reset cannot leave a stale player.
+            if (engine && [engine startAndReturnError:&error]) {
+                CHHapticEventParameter *intensity = [[CHHapticEventParameter alloc]
+                    initWithParameterID:CHHapticEventParameterIDHapticIntensity value:1.0];
+                CHHapticEventParameter *sharpness = [[CHHapticEventParameter alloc]
+                    initWithParameterID:CHHapticEventParameterIDHapticSharpness value:0.5];
+                CHHapticEvent *pulse = [[CHHapticEvent alloc]
+                    initWithEventType:CHHapticEventTypeHapticContinuous
+                    parameters:@[intensity, sharpness] relativeTime:0.0 duration:0.12];
+                CHHapticPattern *pattern = [[CHHapticPattern alloc]
+                    initWithEvents:@[pulse] parameters:@[] error:&error];
+                player = pattern ? [engine createPlayerWithPattern:pattern error:&error] : nil;
+                if (player && [player startAtTime:CHHapticTimeImmediate error:&error]) return;
+            }
+        }
+
+        // Preserve feedback if Core Haptics is unavailable; retry next swipe.
+        player = nil;
+        engine = nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            STCPlayFallbackHaptic();
+        });
+    });
 }
 
 static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
