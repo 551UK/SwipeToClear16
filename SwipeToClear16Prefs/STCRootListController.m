@@ -94,6 +94,19 @@ static BOOL STCSpawnTool(const char *tool, char * const argv[]) {
     [distance setProperty:@YES forKey:@"showValue"];
     [specifiers addObject:distance];
 
+    PSSpecifier *areaGroup = [PSSpecifier groupSpecifierWithName:@"Swipe to Clear Area"];
+    [areaGroup setProperty:@"Percentage of the screen width used for swipe to clear, measured from the left edge. Default: 80%. Start a swipe in the remaining area on the right to scroll normally, even if your finger moves left. 100% uses the full width. Changes apply to the next swipe without a respring." forKey:@"footerText"];
+    [specifiers addObject:areaGroup];
+
+    PSSpecifier *area = [self preferenceSpecifierNamed:@"Clear Area (%)"
+                                                  cell:PSSliderCell
+                                                   key:@"clearAreaPercent"
+                                          defaultValue:@80.0];
+    [area setProperty:@10.0 forKey:@"min"];
+    [area setProperty:@100.0 forKey:@"max"];
+    [area setProperty:@YES forKey:@"showValue"];
+    [specifiers addObject:area];
+
     PSSpecifier *vibrationGroup = [PSSpecifier groupSpecifierWithName:@"Vibration"];
     [vibrationGroup setProperty:@"Tap to type a duration from 1 to 1000 milliseconds. Default: 100 ms. Changes apply immediately." forKey:@"footerText"];
     [specifiers addObject:vibrationGroup];

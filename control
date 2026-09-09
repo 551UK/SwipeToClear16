@@ -1,8 +1,8 @@
 Package: com.551.swipetoclear16
 Name: SwipeToClear16
-Version: 1.0.24
+Version: 1.0.25
 Architecture: iphoneos-arm64
-Description: Clear all Lock Screen notifications with one short swipe anywhere. Also disables notification tucking and the Lock Screen Search UI.
+Description: Clear all Lock Screen notifications with one short downward swipe in an adjustable area on the left (80% by default), leaving the right side free for scrolling. Also disables notification tucking and the Lock Screen Search UI.
 Maintainer: 551
 Author: 551
 Section: Tweaks

@@ -35,17 +35,17 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.24
+          name: SwipeToClear16-rootless-v1.0.25
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.24
-          name: SwipeToClear16 v1.0.24
+          tag: v1.0.25
+          name: SwipeToClear16 v1.0.25
           body: |
-            Adds an editable vibration duration in Settings, from 1 to 1000 ms. Defaults to 100 ms and applies without a respring.
+            Adds an adjustable swipe-to-clear area in Settings, defaulting to the left 80% of the screen. Swipes starting on the right scroll normally, even if your finger drifts left.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate "repos/${{ github.repository }}/releases" --jq '.[] | [.id, .tag_name] | @tsv' | while IFS=$'\t' read -r id tag; do
-            if [ "$tag" != "v1.0.24" ]; then
+            if [ "$tag" != "v1.0.25" ]; then
               gh api --method DELETE "repos/${{ github.repository }}/releases/$id"
             fi
           done

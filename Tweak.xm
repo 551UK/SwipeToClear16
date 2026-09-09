@@ -10,6 +10,7 @@ static NSString * const STCPrefsChanged = @"com.551.swipetoclear16/preferences.c
 static BOOL STCEnabled = YES;
 static BOOL STCPullToClearEnabled = YES;
 static CGFloat STCSwipeDistance = 30.0;
+static CGFloat STCClearAreaPercent = 80.0;
 static double STCHapticDurationMS = 100.0;
 
 @interface NCNotificationStructuredSectionList : NSObject
@@ -49,6 +50,10 @@ static void STCLoadPrefs(void) {
     id pull = STCCopyPreference(@"pullToClearEnabled");
     id swipeDistance = STCCopyPreference(@"swipeDistance");
     id hapticDuration = STCCopyPreference(@"hapticDurationMS");
+    id clearArea = STCCopyPreference(@"clearAreaPercent");
+
+    double percent = [clearArea respondsToSelector:@selector(doubleValue)] ? [clearArea doubleValue] : 80.0;
+    STCClearAreaPercent = isfinite(percent) && percent >= 10.0 && percent <= 100.0 ? percent : 80.0;
 
     STCEnabled = enabled ? [enabled boolValue] : YES;
     STCPullToClearEnabled = pull ? [pull boolValue] : YES;
@@ -164,6 +169,19 @@ static NCNotificationStructuredListViewController *STCFindStructuredController(U
 @end
 
 @implementation STCFullScreenPanDelegate
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
+    if (!STCPullFeatureEnabled()) return NO;
+
+    // Decide at touch-down, before the pan begins. A scroll starting on the
+    // right must never become a clear gesture when the finger drifts left.
+    UIView *coordinateView = gestureRecognizer.view.window ?: gestureRecognizer.view;
+    if (!coordinateView || CGRectGetWidth(coordinateView.bounds) <= 0.0) return NO;
+    CGPoint start = [touch locationInView:coordinateView];
+    CGFloat left = CGRectGetMinX(coordinateView.bounds);
+    CGFloat boundary = left + CGRectGetWidth(coordinateView.bounds) * STCClearAreaPercent / 100.0;
+    return start.x >= left && start.x < boundary;
+}
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
     if (!STCPullFeatureEnabled()) return NO;
