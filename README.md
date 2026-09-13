@@ -2,7 +2,9 @@
 
 Clear all Lock Screen notifications with one short downward swipe starting in the left 80% of the Lock Screen. The right 20% remains available for scrolling through notifications.
 
-Adjust Clear Area (%) in the tweak settings from 10% to 100%. Changes apply to the next swipe without a respring. Swipes starting in the right-hand scrolling area will not clear notifications even if your finger moves left.
+You can adjust Clear Area (%) in the tweak settings from 10% to 100%. Changes apply to the next swipe without a respring. Swipes starting in the right-hand scrolling area will not clear notifications even if your finger moves left. 
+
+I have later set mine to around 55/45 and this feels great.
 
 Iv also added a slider for pull down to clear distance and also haptic feedback duration in the tweak settings. Set it up just how you like it
 
