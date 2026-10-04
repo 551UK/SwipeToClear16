@@ -21,6 +21,7 @@ static double STCHapticDurationMS = 100.0;
 
 @interface NCNotificationMasterList : NSObject
 - (NCNotificationStructuredSectionList *)incomingSectionList;
+- (void)clearAll;
 - (void)setNotificationHistoryRevealed:(BOOL)revealed;
 - (BOOL)isNotificationHistoryRevealed;
 @end
@@ -124,7 +125,18 @@ static void STCPlayClearHaptic(void) {
 }
 
 static BOOL STCClearNotificationsFromController(NCNotificationStructuredListViewController *controller) {
-    NCNotificationStructuredSectionList *incoming = [[controller masterList] incomingSectionList];
+    NCNotificationMasterList *masterList = [controller masterList];
+    if (!masterList) return NO;
+
+    // Prefer iOS's own master-list Clear All path. Clearing only the incoming
+    // section can leave requests in other section lists or internal list state.
+    if ([masterList respondsToSelector:@selector(clearAll)]) {
+        [masterList clearAll];
+        return YES;
+    }
+
+    // Compatibility fallback for builds where the master-list selector differs.
+    NCNotificationStructuredSectionList *incoming = [masterList incomingSectionList];
     if (!incoming) return NO;
 
     if ([incoming respondsToSelector:@selector(clearAll)]) {

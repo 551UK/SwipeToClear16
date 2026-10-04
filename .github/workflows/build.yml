@@ -35,17 +35,17 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeToClear16-rootless-v1.0.25
+          name: SwipeToClear16-rootless-v1.0.26
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v1.0.25
-          name: SwipeToClear16 v1.0.25
+          tag: v1.0.26
+          name: SwipeToClear16 v1.0.26
           body: |
-            Adds an adjustable swipe-to-clear area in Settings, defaulting to the left 80% of the screen. Swipes starting on the right scroll normally, even if your finger drifts left.
+            Hardens notification clearing by using iOS's native master-list Clear All path first, so the swipe clears the full notification list state rather than only the incoming section. Keeps the existing section-level methods as compatibility fallbacks.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate "repos/${{ github.repository }}/releases" --jq '.[] | [.id, .tag_name] | @tsv' | while IFS=$'\t' read -r id tag; do
-            if [ "$tag" != "v1.0.25" ]; then
+            if [ "$tag" != "v1.0.26" ]; then
               gh api --method DELETE "repos/${{ github.repository }}/releases/$id"
             fi
           done

@@ -12,3 +12,6 @@ I have also implemented the tweak stops notification tucking and removes the Loc
 
 Rootless iOS 16 / Dopamine.
 
+
+
+Clearing uses iOS's native master-list Clear All path first so all notification sections/state are cleared, with section-level fallbacks for compatibility.
